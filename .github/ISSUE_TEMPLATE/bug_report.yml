@@ -1,0 +1,35 @@
+name: Bug report
+description: Report a reproducible pi-semantic-screen problem
+title: "[bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened and what did you expect?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: pi-semantic-screen version
+      placeholder: 0.2.0
+    validations:
+      required: true
+  - type: input
+    id: pi
+    attributes:
+      label: Pi version
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Include the command/prompt, preset, scope, and compact output. Do not paste secrets or proprietary source.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node version, Python version, classifier provider/model, and relevant PI_SEMANTIC_SCREEN_* variables.

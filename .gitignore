@@ -1,0 +1,17 @@
+node_modules/
+dist/
+coverage/
+*.log
+*.tgz
+*.zip
+.DS_Store
+Thumbs.db
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.venv/
+venv/

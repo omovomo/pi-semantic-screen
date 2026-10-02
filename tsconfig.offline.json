@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@earendil-works/pi-ai": [
+        "./types/upstream-0.99.1.d.ts"
+      ],
+      "@earendil-works/pi-coding-agent": [
+        "./types/upstream-0.99.1.d.ts"
+      ],
+      "typebox": [
+        "./types/typebox-shim.d.ts"
+      ]
+    },
+    "types": [],
+    "lib": [
+      "ES2024",
+      "DOM"
+    ]
+  },
+  "include": [
+    "extensions/**/*.ts",
+    "src/**/*.ts",
+    "types/**/*.d.ts"
+  ]
+}
