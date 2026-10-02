@@ -18,8 +18,8 @@ git push -u origin main
 Create a version tag:
 
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 The repository intentionally does not contain generated `.zip`/`.tgz` release files, `node_modules`, credentials, or local review evidence.
@@ -34,15 +34,15 @@ gh auth login
 
 git init
 git add .
-git commit -m "Initial release v0.2.0"
+git commit -m "Initial release v0.2.1"
 git branch -M main
 
 gh repo create pi-semantic-screen --public --source=. --remote=origin --push --description "Adapter-driven semantic screening and resumable evidence review for Pi Code Mode"
 
-git tag -a v0.2.0 -m "pi-semantic-screen v0.2.0"
-git push origin v0.2.0
+git tag -a v0.2.1 -m "pi-semantic-screen v0.2.1"
+git push origin v0.2.1
 
-gh release create v0.2.0 --title "pi-semantic-screen v0.2.0" --generate-notes --verify-tag
+gh release create v0.2.1 --title "pi-semantic-screen v0.2.1" --generate-notes --verify-tag
 ```
 
 `gh repo create --source=. --push` publishes the existing local repository and configures the `origin` remote. The repository already contains the MIT `LICENSE`, so do not ask GitHub CLI to generate a second license file. GitHub CLI can also create the release directly from the pushed tag.
@@ -51,7 +51,7 @@ To install the tagged release for the currently authenticated GitHub user:
 
 ```powershell
 $owner = gh api user --jq .login
-pi install "git:github.com/$owner/pi-semantic-screen@v0.2.0"
+pi install "git:github.com/$owner/pi-semantic-screen@v0.2.1"
 ```
 
 ## Install in Pi from GitHub
@@ -65,13 +65,13 @@ pi install git:github.com/<owner>/pi-semantic-screen
 Pinned release tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.2.0
+pi install git:github.com/<owner>/pi-semantic-screen@v0.2.1
 ```
 
 Project-local package declaration:
 
 ```text
-pi install -l git:github.com/<owner>/pi-semantic-screen@v0.2.0
+pi install -l git:github.com/<owner>/pi-semantic-screen@v0.2.1
 ```
 
 A normal HTTPS repository URL is also treated by Pi as a git package source.

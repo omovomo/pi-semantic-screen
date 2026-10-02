@@ -2,13 +2,13 @@
 
 Adapter-driven semantic screening for Pi Code Mode: cheaply classify many candidates, then perform bounded resumable deep review over deterministic evidence.
 
-Version **0.2.0** replaces use-case-specific orchestration with a generic engine + adapters + presets.
+Version **0.2.1** replaces use-case-specific orchestration with a generic engine + adapters + presets.
 
-## Why 0.2.0
+## Why 0.2.1
 
 Early releases proved the classifier path but also exposed a scaling problem: a rich `/screen-exceptions` prompt repeatedly asked the parent model to generate Python AST/evidence scripts. That made extraction inconsistent and expensive.
 
-0.2.0 separates concerns:
+0.2.1 separates concerns:
 
 ```text
 screen_batch / screen_preflight   generic classifier engine
@@ -46,7 +46,7 @@ pi -e ./pi-semantic-screen
 GitHub release tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.2.0
+pi install git:github.com/<owner>/pi-semantic-screen@v0.2.1
 ```
 
 Pi packages are designed to distribute extensions, skills, and prompt templates together, including installation from git/npm/local sources. Host Pi packages are declared as peer dependencies rather than bundled runtime dependencies.

@@ -121,3 +121,7 @@ From 0.2.0 onward:
 - `screen_batch` classifies generically.
 
 Most future use cases should require a small preset. Only genuinely new source semantics require a new adapter.
+
+## Single-call-per-stage orchestration
+
+Structured adapter tools must not be invoked twice merely because the parent first previews a result and later needs the same structured data in Code Mode. Call the tool from Code Mode on first use and reuse that result. In particular, avoid `direct screen_preset -> Code Mode screen_preset` and `direct screen_evidence -> Code Mode screen_evidence`. Each evidence packet is built once, its exact IDs are stored in the same execution, and its evidence is then reviewed by the parent.

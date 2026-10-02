@@ -81,3 +81,21 @@ test("ad-hoc screen clearly distinguishes weaker guarantees", () => {
   assert.match(adHocPrompt, /genuinely ad-hoc task/i);
   assert.match(adHocPrompt, /Do not claim deterministic semantic-review coverage/i);
 });
+
+
+test("preset orchestration forbids direct preview plus Code Mode duplicate calls", () => {
+  assert.match(skill, /single-call-per-stage/i);
+  assert.match(skill, /never make a direct preview call and then repeat the same `screen_preset`, `screen_discover`, `screen_preflight`, `screen_batch`, or `screen_evidence` call inside Code Mode/i);
+  assert.match(skill, /one Code Mode execution, call `screen_preset\(\{id\}\)`, then `screen_discover\(\{preset:id, scope, mode:"count"\}\)`, then `screen_preflight\(\{count\}\)`/i);
+  assert.match(skill, /call `screen_discover\(\{preset:id, scope, mode:"candidates"\}\)` once and immediately call `screen_batch` once/i);
+  assert.match(genericPrompt, /one Code Mode call per structured stage/i);
+  assert.match(genericPrompt, /never call a tool directly for a preview and then repeat the same call inside Code Mode/i);
+});
+
+test("evidence orchestration fetches each packet once and stores exact ids in the same execution", () => {
+  assert.match(skill, /Fetch each evidence packet exactly once from Code Mode/i);
+  assert.match(skill, /In the same Code Mode execution, set `pendingPacketIds` to those exact IDs/i);
+  assert.match(genericPrompt, /Fetch each packet exactly once inside Code Mode/i);
+  assert.match(genericPrompt, /Never do direct `screen_evidence` \+ Code Mode `screen_evidence` for the same packet/i);
+  assert.match(continuePrompt, /Do not make direct preview calls to `screen_preset` or `screen_evidence` and then repeat them in Code Mode/i);
+});

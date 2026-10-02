@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 - 2026-10-02
+
+### Changed
+
+- Preset orchestration is now explicitly single-call-per-stage. Structured tools are called from Code Mode the first time their results are needed for state/composition; direct preview + Code Mode duplicate calls are prohibited.
+- Initial preset/count/preflight work is grouped into one Code Mode stage.
+- Candidate discovery + primary `screen_batch` are grouped into one post-approval Code Mode stage.
+- Each `screen_evidence` packet is fetched exactly once; its exact `packetIds` are persisted in the same execution before evidence is emitted for parent review.
+- `/screen-continue` follows the same no-preview/no-duplicate contract.
+
 All notable changes to `pi-semantic-screen` are documented here.
 
 ## 0.2.0 - 2026-10-02
