@@ -1,8 +1,8 @@
 {
   "name": "pi-semantic-screen",
-  "version": "0.3.1",
+  "version": "0.5.3",
   "type": "module",
-  "description": "Adapter-driven semantic screening and resumable evidence review for Pi Code Mode",
+  "description": "Adapter-driven semantic screening and extension-owned evidence review for Pi",
   "keywords": [
     "pi-package",
     "classifier",

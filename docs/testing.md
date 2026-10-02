@@ -1,14 +1,12 @@
 # Testing
 
-## Required offline checks
-
-From a fresh clone first install the locked development dependencies:
+Install the committed development dependencies first:
 
 ```sh
 npm ci
 ```
 
-Then run:
+Run the standard offline checks:
 
 ```sh
 npm test
@@ -16,41 +14,74 @@ npm run typecheck:offline
 npm run pack:dry
 ```
 
-These checks cover:
+Or:
 
-- classifier engine invariants;
-- preflight guard;
-- process-local screening reuse;
-- extension tool registration;
-- preset/adapter registries;
-- Python exception count/candidate/evidence behavior;
-- exact evidence packet IDs, item/source/character caps, token-budget trimming, and review-contract overhead;
-- explicit semantic dispositions, expanded-evidence escalation, and per-ID blocked-evidence quarantine;
-- fail-closed Python syntax failures;
-- fail-closed transport-truncation accounting contracts;
-- prompt/skill architecture boundaries.
+```sh
+npm run check
+```
 
-## Host checks
+## What the test suite covers
 
-With a matching Pi installation and development dependencies:
+The suite includes:
+
+- classifier bucket/accounting/fail-closed behavior;
+- redaction, abort, concurrency and process-local classifier-result reuse;
+- preflight approval guard;
+- adapter deterministic discovery/evidence and stale/syntax failures;
+- evidence token bounding and review-contract overhead;
+- exact review disposition validation;
+- extension-owned review workflow transitions;
+- idempotent pending packet retrieval;
+- stale packet commit rejection;
+- standard-insufficient -> expanded priority;
+- expanded-insufficient -> blocked quarantine without global stop;
+- terminal findings/blocked/disposition accounting;
+- prompt/skill contract tests preventing model-owned review-state merging;
+- package metadata and tool exposure.
+
+## Full regression audit
+
+After unit checks, load the package in Pi and run:
+
+```text
+/screen-exceptions garp_cli/
+```
+
+Approve the classifier batch when requested, then use:
+
+```text
+/screen-continue
+```
+
+until terminal status.
+
+For a full JSONL regression, verify:
+
+```text
+screen_preset        1
+screen_discover      2 (count + candidates)
+screen_batch         1
+screen_review_start  1
+screen_review_next   one per distinct/retried pending packet
+screen_review_commit one per committed packet
+screen_evidence      0 in canonical preset review
+screen_review_apply  0 in canonical preset review
+PowerShell/generated AST 0
+```
+
+Also verify:
+
+- no duplicate evidence build when `screen_review_next` is repeated before commit;
+- no manual `reviewedIds`/blocked/expanded queue mutations in Code Mode;
+- no stale/empty-ID fetches;
+- exact terminal progress comes from `screen_review_commit`/`screen_review_next`;
+- `tlh_portfolio.py:761`, malformed Flex lot/transaction cases, and `rebalance.py:2329` receive evidence/dispositions consistent with the preset contract.
+
+## Full development environment
+
+When Pi development dependencies are available locally, also run:
 
 ```sh
 npm run typecheck
 npm run test:codemode
 ```
-
-The Code Mode smoke test is optional in environments where the `pi` executable or classifier credentials are unavailable.
-
-## Regression test strategy
-
-Do not rerun an expensive full-project semantic audit for every documentation-only change.
-
-Run a full real-project regression when changing:
-
-- adapter candidate identity/content;
-- evidence extraction;
-- preset semantic questions/thresholds;
-- screening/review state accounting;
-- Pi tool boundary behavior.
-
-For ordinary repository/docs changes, the offline suite and package dry-run are sufficient.

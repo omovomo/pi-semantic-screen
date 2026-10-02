@@ -9,6 +9,7 @@ declare module "typebox" {
     Array(items: Schema, options?: Record<string, unknown>): Schema;
     Optional(schema: Schema): Schema;
     Literal(value: string | number | boolean): Schema;
+    Tuple(items: Schema[], options?: Record<string, unknown>): Schema;
     Union(schemas: Schema[]): Schema;
   };
 }

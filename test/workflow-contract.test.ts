@@ -10,139 +10,110 @@ const adHocPrompt = readFileSync(new URL("../prompts/screen.md", import.meta.url
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 
+test("skill frontmatter includes Pi-required name and description", () => {
+  const frontmatter = skill.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  assert.ok(frontmatter, "SKILL.md must start with YAML frontmatter");
+  assert.match(frontmatter[1], /^name:\s*\S+/m);
+  assert.match(frontmatter[1], /^description:\s*\S+/m);
+});
+
 test("package exposes extensions, skills, and prompt templates", () => {
   assert.deepEqual(packageJson.pi.extensions, ["./extensions/screen.ts"]);
   assert.deepEqual(packageJson.pi.skills, ["./skills"]);
   assert.deepEqual(packageJson.pi.prompts, ["./prompts/*.md"]);
 });
 
-test("generic skill delegates deterministic work to preset adapters", () => {
-  assert.match(skill, /Presets contain the semantic questions and review policy; adapters own deterministic discovery and evidence extraction/i);
+test("generic skill delegates discovery/evidence to presets and adapters", () => {
+  assert.match(skill, /Presets contain classifier and review policy; adapters own deterministic discovery and evidence extraction/i);
   assert.match(skill, /Do not reimplement adapter logic in Code Mode, Python, PowerShell, grep, or ad-hoc AST code/i);
   assert.match(skill, /screen_preset\(\{id\}\)/i);
   assert.match(skill, /screen_discover\(\{preset:id, scope, mode:"count"\}\)/i);
-  assert.match(skill, /screen_evidence/i);
 });
 
-test("generic skill keeps the approval guard before rich discovery", () => {
-  assert.match(skill, /`screen_preflight\(\{count\}\)` before constructing candidate text/i);
-  assert.match(skill, /No classifier calls are allowed before approval/i);
-  assert.match(skill, /mode:"candidates"\}\)` once/i);
-});
-
-test("generic skill keeps primary canonical and refinement opt-in", () => {
+test("generic skill keeps approval guard and canonical primary screening", () => {
+  assert.match(skill, /screen_preflight\(\{count\}\)/i);
+  assert.match(skill, /No candidate text or classifier calls are allowed before approval/i);
+  assert.match(skill, /confirm:true/i);
+  assert.match(skill, /omitting `confirm:true` is a workflow error/i);
+  assert.match(skill, /primary\.status === "ok"/i);
+  assert.match(skill, /do \*\*not\*\* call `screen_review_start`/i);
   assert.match(skill, /first successful primary result is canonical/i);
   assert.match(skill, /Refinement is opt-in only/i);
-  assert.match(skill, /A large retained set alone is not authorization/i);
   assert.match(skill, /refinementYield = refinementDropped \/ primaryRetained/i);
   assert.match(skill, /below 0\.30 mark `lowYield:true`/i);
+  assert.match(skill, /large retained set alone is not authorization/i);
 });
 
-test("review state preserves exact evidence accounting", () => {
-  assert.match(skill, /semantic_screen_review_state/i);
-  assert.match(skill, /`reviewedIds ⊆ evidenceSeenIds`/i);
-  assert.match(skill, /exact previous `pendingPacketIds`/i);
-  assert.match(skill, /`blockedEvidenceIds`.*disjoint from `reviewedIds`/is);
-  assert.match(skill, /`reviewableRemaining = reviewTargetIds - reviewedIds - blockedEvidenceIds`/i);
-  assert.match(skill, /resumeAvailable:true.*actionable targets/is);
-  assert.match(skill, /Never infer reviewed coverage from requested packet size, offsets, slices, packet count, or a successful fetch alone/i);
+
+test("post-approval canonical flow propagates approval with confirm true", () => {
+  assert.match(skill, /screen_batch` once with the preset primary question\/criteria\/threshold \*\*and `confirm:true`\*\*/i);
+  assert.match(genericPrompt, /Explicit approval must be propagated to the guarded classifier call through `confirm:true`/i);
 });
 
-test("review evidence comes only from screen_evidence", () => {
-  assert.match(skill, /Fetch evidence only with `screen_evidence`/i);
-  assert.match(skill, /do not regenerate source extractors in Code Mode/i);
-  assert.match(skill, /set `pendingPacketIds` to the exact returned IDs/i);
-  assert.match(skill, /roughly 100-120 semantic dispositions and \*\*at most three\*\* evidence packets/i);
-  assert.match(skill, /truncated.*do not disposition or commit/is);
+test("non-ok primary result cannot start semantic review", () => {
+  assert.match(skill, /require `primary\.status === "ok"` before constructing any review target/i);
+  assert.match(skill, /If primary status is `approval_required` or `error`, stop with `reviewStarted:false`/i);
+  assert.match(genericPrompt, /Require `primary\.status === "ok"` before computing retained IDs or starting review/i);
 });
 
-test("screen-use is the generic preset entry point", () => {
+test("preset workflow hands review state ownership to the extension", () => {
+  assert.match(skill, /screen_review_start\(\{preset, scope, reviewTargetIds\}\)/i);
+  assert.match(skill, /extension now owns semantic-review state/i);
+  assert.match(skill, /must not maintain semantic-review accounting/i);
+  assert.match(skill, /Do not store or merge `reviewedIds`, `evidenceSeenIds`, `needsExpandedEvidenceIds`, `blockedEvidenceIds`, `pendingPacketIds`/i);
+  assert.match(skill, /Review workflow state is process-local to the active Pi session/i);
+  assert.doesNotMatch(skill, /semantic_screen_review_state/i);
+});
+
+test("semantic review loop uses next and atomic commit, not model-owned state merging", () => {
+  assert.match(skill, /Use `screen_review_next` and `screen_review_commit` directly/i);
+  assert.match(skill, /exactly one `\{id, disposition, rationale\}` for every returned packet ID/i);
+  assert.match(skill, /Call `screen_review_commit\(\{workflowId, packetId, dispositions\}\)` exactly once/i);
+  assert.match(skill, /Do not call `screen_review_apply`/i);
+  assert.match(skill, /Repeated `screen_review_next` before commit returns the same pending packet/i);
+  assert.match(skill, /at most three distinct packets or roughly 100-120 semantic dispositions/i);
+});
+
+test("review contract keeps explicit dispositions and persisted-state defaulting rule", () => {
+  assert.match(skill, /`UI_ONLY`: display-only effect/i);
+  assert.match(skill, /`EXPECTED_NORMALIZATION`: normalization explicitly allowed/i);
+  assert.match(skill, /missing context is not enough/i);
+  assert.match(skill, /returning an empty\/default domain object after an authoritative persisted-state read\/parse failure is not expected normalization/i);
+});
+
+test("screen-use initializes extension-owned review and avoids low-level review tools", () => {
   assert.match(genericPrompt, /preset `\$1`, scope `\$\{2:-\.\}`/i);
-  assert.match(genericPrompt, /Use only `screen_preset`, `screen_discover`, `screen_preflight`, `screen_batch`, and `screen_evidence`/i);
-  assert.match(genericPrompt, /Do not recreate the preset's discovery\/evidence logic/i);
+  assert.match(genericPrompt, /screen_batch` \*\*with `confirm:true`\*\*/i);
+  assert.match(genericPrompt, /Require `primary\.status === "ok"`/i);
+  assert.match(genericPrompt, /stop with `reviewStarted:false` and do not call `screen_review_start`/i);
+  assert.match(genericPrompt, /screen_review_start/i);
+  assert.match(genericPrompt, /nested tool result is a JSON string, parse it once/i);
+  assert.match(genericPrompt, /Do not store semantic-review arrays\/sets/i);
+  assert.match(genericPrompt, /screen_review_next.*screen_review_commit/is);
+  assert.match(genericPrompt, /Do not use low-level `screen_evidence` or `screen_review_apply`/i);
   assert.match(genericPrompt, /`--refine`/i);
 });
 
-test("screen-exceptions is a short alias rather than a workflow implementation", () => {
+test("screen-exceptions stays a compact alias", () => {
   assert.match(exceptionPrompt, /preset: `python-exceptions`/i);
   assert.match(exceptionPrompt, /alias for `\/screen-use python-exceptions/i);
   assert.match(exceptionPrompt, /Do not implement Python AST discovery or evidence extraction in Code Mode/i);
   assert.ok(exceptionPrompt.split(/\r?\n/).length < 20, "exception alias should stay compact");
-  assert.doesNotMatch(exceptionPrompt, /ast\.ExceptHandler|PowerShell|btoa|TextEncoder|40,000|120 semantically reviewed/i);
+  assert.doesNotMatch(exceptionPrompt, /ast\.ExceptHandler|PowerShell|btoa|TextEncoder/i);
 });
 
-test("screen-continue resumes only through the stored preset adapter", () => {
-  assert.match(continuePrompt, /load `semantic_screen_review_state`/i);
-  assert.match(continuePrompt, /Do not call `screen_preset`, `screen_preflight`, `screen_discover`, or `screen_batch`/i);
-  assert.match(continuePrompt, /continue only through `screen_evidence`/i);
+test("screen-continue resumes latest extension-owned workflow without rescreening", () => {
+  assert.match(continuePrompt, /latest extension-owned semantic review/i);
+  assert.match(continuePrompt, /Do not call `screen_preset`, `screen_preflight`, `screen_discover`, `screen_batch`, `screen_evidence`, or `screen_review_apply`/i);
+  assert.match(continuePrompt, /screen_review_next\(\{\}\)/i);
+  assert.match(continuePrompt, /screen_review_commit\(\{workflowId, packetId, dispositions\}\)/i);
+  assert.match(continuePrompt, /Never maintain or merge those sets in Code Mode/i);
+  assert.match(continuePrompt, /same pending packet and packet ID/i);
   assert.match(continuePrompt, /zero classifier calls and zero rediscovery passes/i);
-  assert.match(continuePrompt, /exact `packetIds` as `pendingPacketIds`/i);
 });
 
 test("ad-hoc screen clearly distinguishes weaker guarantees", () => {
   assert.match(adHocPrompt, /Prefer `\/screen-use <preset>/i);
   assert.match(adHocPrompt, /genuinely ad-hoc task/i);
   assert.match(adHocPrompt, /Do not claim deterministic semantic-review coverage/i);
-});
-
-
-test("preset orchestration forbids direct preview plus Code Mode duplicate calls", () => {
-  assert.match(skill, /single-call-per-stage/i);
-  assert.match(skill, /never make a direct preview call and then repeat the same `screen_preset`, `screen_discover`, `screen_preflight`, `screen_batch`, or `screen_evidence` call inside Code Mode/i);
-  assert.match(skill, /call `screen_preset\(\{id\}\)` exactly once for the workflow/i);
-  assert.match(skill, /Then call `screen_discover\(\{preset:id, scope, mode:"count"\}\)`, then `screen_preflight\(\{count\}\)`/i);
-  assert.match(skill, /call `screen_discover\(\{preset:id, scope, mode:"candidates"\}\)` once and immediately call `screen_batch` once/i);
-  assert.match(genericPrompt, /one Code Mode call per structured stage/i);
-  assert.match(genericPrompt, /never call a tool directly for a preview and then repeat the same call inside Code Mode/i);
-});
-
-test("evidence orchestration fetches each packet once and stores exact ids in the same execution", () => {
-  assert.match(skill, /Fetch each evidence packet exactly once from Code Mode/i);
-  assert.match(skill, /In the same fetch execution, set `pendingPacketIds` to the exact returned IDs/i);
-  assert.match(genericPrompt, /fetch each distinct packet exactly once inside Code Mode/i);
-  assert.match(genericPrompt, /single-call-per-packet, not single-packet-per-turn/i);
-  assert.match(continuePrompt, /Do not preview it directly first/i);
-});
-
-test("transport truncation is fail-closed and pending ids are not evidence-seen before disposition", () => {
-  assert.match(skill, /pending IDs are not evidence-seen yet/i);
-  assert.match(skill, /transport-truncated packet can never advance `reviewedIds` or `evidenceSeenIds`/i);
-  assert.match(skill, /visible evidence item IDs do not exactly equal `pendingPacketIds`/i);
-  assert.match(genericPrompt, /do not add pending IDs to `evidenceSeenIds` until the parent has actually received the complete packet/i);
-  assert.match(continuePrompt, /do .*not.* add them to `evidenceSeenIds` yet/i);
-});
-
-test("continuation reuses stored preset and pipelines distinct packets", () => {
-  assert.match(continuePrompt, /Do not call `screen_preset`/i);
-  assert.match(continuePrompt, /single-call-per-packet, not single-packet-per-turn/i);
-  assert.match(continuePrompt, /up to three different packets/i);
-  assert.match(skill, /make zero `screen_preset`, classifier, preflight, or rediscovery calls/i);
-});
-
-
-test("semantic review uses explicit contract dispositions and fail-closed evidence escalation", () => {
-  assert.match(skill, /Each successful `screen_evidence` packet includes a `reviewContract`/i);
-  assert.match(skill, /UI\/display-only effect is `UI_ONLY` rather than a finding/i);
-  assert.match(skill, /exactly one `\{id, disposition, rationale\}` for every `pendingPacketId`/i);
-  assert.match(skill, /only for `CONFIRM`/i);
-  assert.match(skill, /`INSUFFICIENT_EVIDENCE`.*does not advance `reviewedIds`/is);
-  assert.match(skill, /detail:"expanded"/i);
-  assert.match(skill, /blockedEvidenceIds/i);
-  assert.match(skill, /fail closed \*\*for that ID only\*\*/i);
-  assert.match(skill, /Do not globally stop review because one ID is blocked/i);
-  assert.match(skill, /review_complete_with_blocked_evidence/i);
-  assert.match(genericPrompt, /explicit `reviewContract`/i);
-  assert.match(continuePrompt, /needsExpandedEvidenceIds/i);
-});
-
-
-test("expanded insufficient evidence is quarantined without blocking independent targets", () => {
-  assert.match(continuePrompt, /remaining `reviewTargetIds - reviewedIds - blockedEvidenceIds`/i);
-  assert.match(continuePrompt, /Never automatically refetch `blockedEvidenceIds`/i);
-  assert.match(continuePrompt, /Expanded-detail `INSUFFICIENT_EVIDENCE` is fail-closed \*\*for that ID only\*\*/i);
-  assert.match(continuePrompt, /Never stop the entire workflow merely because blocked IDs exist/i);
-  assert.match(continuePrompt, /blockedEvidenceIds ∩ reviewedIds = ∅/i);
-  assert.match(continuePrompt, /status:review_complete_with_blocked_evidence/i);
-  assert.match(genericPrompt, /expanded-detail `INSUFFICIENT_EVIDENCE` moves to `blockedEvidenceIds`/i);
-  assert.match(genericPrompt, /When all targets are either reviewed or blocked/i);
 });

@@ -40,9 +40,9 @@ Return:
 - `items`: evidence records in the same order;
 - `sourceCount` and `chars`;
 - `status:"error"` on stale/unresolvable targets or source failures;
-- expanded detail may add bounded function-tail/caller context for IDs that were semantically unresolved at standard detail.
+- expanded detail adds targeted data-flow hints (`tracked`, `pre_try_writes`, `post_handler_reads`), post-handler validation/control hints, core calls using tracked values, persistence/save calls, and wider bounded caller context; generic function-tail text remains a bounded fallback for IDs unresolved at standard detail.
 
-The caller must never infer packet membership from the requested number of IDs. After adapter extraction, the extension may further trim complete items to the preset `maxTokens` transport budget and recomputes exact packet metadata.
+The caller must never infer packet membership from the requested number of IDs. After adapter extraction, the extension may further trim complete items to the preset `maxTokens` transport budget and recompute exact packet metadata. This is normal bounded pagination: callers must review the returned subset and continue with the remaining IDs rather than treating `requested > packetIds.length` as an error.
 
 ## Adding an adapter
 

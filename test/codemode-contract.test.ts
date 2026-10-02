@@ -4,54 +4,57 @@ import test from "node:test";
 
 const source = readFileSync(new URL("../extensions/screen.ts", import.meta.url), "utf8");
 
-test("extension exposes preset, adapter, preflight and classifier tools with structured output for Code Mode", () => {
-  assert.match(source, /name:\s*"screen_preset"/);
-  assert.match(source, /name:\s*"screen_discover"/);
-  assert.match(source, /name:\s*"screen_evidence"/);
-  assert.match(source, /name:\s*"screen_preflight"/);
-  assert.match(source, /name:\s*"screen_batch"/);
-  assert.match(source, /presetOutputSchema/);
-  assert.match(source, /discoverOutputSchema/);
-  assert.match(source, /evidenceOutputSchema/);
-  assert.match(source, /preflightOutputSchema/);
-  assert.match(source, /outputSchema,/);
-  assert.match(source, /structuredContent:\s*structuredResult/);
-  assert.match(source, /rescreen:/);
+test("extension exposes screening and extension-owned review tools", () => {
+  for (const name of [
+    "screen_preset",
+    "screen_discover",
+    "screen_evidence",
+    "screen_review_apply",
+    "screen_review_start",
+    "screen_review_next",
+    "screen_review_commit",
+    "screen_preflight",
+    "screen_batch",
+  ]) assert.match(source, new RegExp(`name:\\s*"${name}"`));
+  assert.match(source, /reviewStartOutputSchema/);
+  assert.match(source, /reviewNextOutputSchema/);
+  assert.match(source, /reviewCommitOutputSchema/);
+  assert.match(source, /ReviewWorkflowManager/);
+  assert.match(source, /structuredContent:\s*result/);
   assert.match(source, /runWithScreeningCache/);
   assert.match(source, /classifierAccounting/);
-  assert.match(source, /accounting\?\.complete/);
-  assert.match(source, /\.\.\.\(toolUsage \? \{ usage: toolUsage \} : \{\}\)/);
   assert.doesNotMatch(source, /@garygentry\/system1-pi|decide\.exe|\bspawn(?:Sync)?\([^\n]*["\']decide["\']/i);
 });
 
-
-test("extension defers context compaction to the host unless explicitly configured", () => {
+test("extension defers context compaction to host and preserves extension-owned review semantics", () => {
   assert.match(source, /PI_SEMANTIC_SCREEN_COMPACT_THRESHOLD/);
-  assert.match(source, /parseNonNegativeEnvInt\([\s\S]*?PI_SEMANTIC_SCREEN_COMPACT_THRESHOLD[\s\S]*?\n\s*0,/);
-  assert.match(source, /pi\.on\("before_agent_start"/);
-  assert.match(source, /isSemanticScreenPrompt\(event\.prompt\)/);
+  assert.match(source, /pi\.on\("session_start"/);
+  assert.match(source, /reviewWorkflows\.reset\(\)/);
   assert.match(source, /pi\.on\("turn_end"/);
-  assert.match(source, /ctx\.getContextUsage\(\)/);
   assert.match(source, /ctx\.compact\(\{/);
-  assert.match(source, /Drop superseded raw evidence\/source excerpts/);
-  assert.match(source, /if \(completed\) semanticScreenWorkflowActive = false/);
+  assert.match(source, /Exact review accounting lives in the extension-owned review workflow state/i);
 });
 
-test("screen_evidence exposes a transport token budget and exact post-trim accounting", () => {
+test("screen_evidence remains token-bounded and contract-carrying", () => {
   assert.match(source, /maxTokens: Type\.Optional/);
   assert.match(source, /tokenBudget: Type\.Integer/);
   assert.match(source, /estimatedTokens: Type\.Integer/);
+  assert.match(source, /trimmed: Type\.Boolean/);
+  assert.match(source, /buildEvidencePacket/);
   assert.match(source, /boundEvidenceByTokens/);
-  assert.match(source, /preset\.evidence\.maxTokens/);
+  assert.match(source, /buildReviewContract/);
 });
 
-
-test("screen_evidence carries the semantic review contract and supports expanded detail", () => {
-  assert.match(source, /reviewContractSchema/);
-  assert.match(source, /buildReviewContract/);
-  assert.match(source, /rejectWhen: Type\.String\(\)/);
-  assert.match(source, /Type\.Literal\("INSUFFICIENT_EVIDENCE"\)/);
-  assert.match(source, /detail: Type\.Optional/);
-  assert.match(source, /Type\.Literal\("expanded"\)/);
-  assert.match(source, /\{ preset: preset\.id, detail, reviewContract \}/);
+test("stateful review tools start, return idempotent pending packets, and commit atomically", () => {
+  assert.match(source, /reviewWorkflows\.start\(/);
+  assert.match(source, /reviewWorkflows\.next\(/);
+  assert.match(source, /reviewWorkflows\.commit\(/);
+  assert.match(source, /name:\s*"screen_review_next"[\s\S]*?executionMode:\s*"sequential"/);
+  assert.match(source, /name:\s*"screen_review_commit"[\s\S]*?executionMode:\s*"sequential"/);
+  assert.match(source, /Omit workflowId to resume the latest workflow/i);
+  assert.match(source, /Atomically validate dispositions/i);
+  assert.match(source, /reviewDecisionTupleSchema = Type\.Tuple/);
+  assert.match(source, /reviewDecisionCommitSchema = Type\.Union/);
+  assert.match(source, /name:\s*"screen_review_next"[\s\S]*?const text = JSON\.stringify\(result\)/);
+  assert.match(source, /name:\s*"screen_review_commit"[\s\S]*?const text = JSON\.stringify\(result\)/);
 });

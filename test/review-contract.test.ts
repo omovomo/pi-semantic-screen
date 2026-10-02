@@ -13,5 +13,18 @@ test("review contract exposes explicit terminal/non-terminal dispositions", () =
   assert.match(contract.dispositions.find((entry) => entry.id === "NO_OUTWARD_EFFECT")?.description ?? "", /affirmatively establishes/i);
   assert.match(contract.instructions, /Absence of shown downstream evidence is not proof/i);
   assert.match(contract.rejectWhen, /Missing context is INSUFFICIENT_EVIDENCE/i);
-  assert.match(contract.insufficientEvidenceAction, /detail=expanded/i);
+  assert.match(contract.insufficientEvidenceAction, /screen_review_commit.*automatically prioritizes expanded evidence/i);
+  assert.match(contract.dispositions.find((entry) => entry.id === "EXPECTED_NORMALIZATION")?.description ?? "", /authoritative record/i);
+  assert.match(contract.confirmWhen, /authoritative source record/i);
+  assert.match(contract.rejectWhen, /malformed authoritative lot\/transaction\/record/i);
+});
+
+test("review contract stays compact while retaining fail-closed semantic rules", () => {
+  const contract = buildReviewContract(pythonExceptionsPreset);
+  const serialized = JSON.stringify(contract);
+  assert.ok(serialized.length <= 2700, `review contract too large: ${serialized.length} bytes`);
+  assert.match(contract.confirmWhen, /authoritative source record/i);
+  assert.match(contract.confirmWhen, /persisted-state read\/parse/i);
+  assert.match(contract.rejectWhen, /malformed authoritative lot\/transaction\/record/i);
+  assert.match(contract.rejectWhen, /Missing context is INSUFFICIENT_EVIDENCE/i);
 });

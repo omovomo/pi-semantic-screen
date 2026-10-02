@@ -5,9 +5,13 @@
 ## Data boundary
 
 - `screen_batch` can egress only the item text, question, and criteria explicitly passed to it after redaction.
-- `screen_discover` and `screen_evidence` are local read-only adapter operations.
+- `screen_discover` and low-level `screen_evidence` are local adapter operations.
+- `screen_review_start`, `screen_review_next`, and `screen_review_commit` keep review workflow state in local Pi process memory; they do not make network requests.
+- A pending review workflow may temporarily retain its current raw evidence packet in memory so repeated `screen_review_next` is idempotent. That packet is released after commit.
+- Review accounting, findings, and blocked reasons are not serialized by the parent model into Code Mode state in the canonical workflow.
 - The built-in `python-exceptions` adapter reads Python source under the requested scope and invokes a local Python interpreter; it does not make network requests.
-- Raw candidate/evidence text should not be persisted in Code Mode store state.
+
+Restarting Pi clears process-local review workflows.
 
 ## Reporting
 

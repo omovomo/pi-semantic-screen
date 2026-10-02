@@ -164,6 +164,275 @@ def function_returns(function_node: ast.AST | None) -> list[ast.Return]:
     return found
 
 
+
+
+def expression_key(node: ast.AST | None) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        base = expression_key(node.value)
+        return f"{base}.{node.attr}" if base else node.attr
+    return None
+
+
+def assigned_keys(nodes: list[ast.AST]) -> set[str]:
+    keys: set[str] = set()
+    mutators = {"append", "extend", "update", "add", "discard", "remove", "pop", "clear", "setdefault"}
+
+    def add_target(target: ast.AST) -> None:
+        key = expression_key(target)
+        if key:
+            keys.add(key)
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            for item in target.elts:
+                add_target(item)
+
+    class Visitor(ast.NodeVisitor):
+        def visit_Assign(self, node: ast.Assign):
+            for target in node.targets:
+                add_target(target)
+            self.visit(node.value)
+
+        def visit_AnnAssign(self, node: ast.AnnAssign):
+            add_target(node.target)
+            if node.value is not None:
+                self.visit(node.value)
+
+        def visit_AugAssign(self, node: ast.AugAssign):
+            add_target(node.target)
+            self.visit(node.value)
+
+        def visit_NamedExpr(self, node: ast.NamedExpr):
+            add_target(node.target)
+            self.visit(node.value)
+
+        def visit_For(self, node: ast.For):
+            add_target(node.target)
+            self.generic_visit(node)
+
+        def visit_AsyncFor(self, node: ast.AsyncFor):
+            add_target(node.target)
+            self.generic_visit(node)
+
+        def visit_With(self, node: ast.With):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    add_target(item.optional_vars)
+            self.generic_visit(node)
+
+        def visit_Call(self, node: ast.Call):
+            if isinstance(node.func, ast.Attribute) and node.func.attr in mutators:
+                key = expression_key(node.func.value)
+                if key:
+                    keys.add(key)
+            self.generic_visit(node)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef):
+            return
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+            return
+
+        def visit_ClassDef(self, node: ast.ClassDef):
+            return
+
+        def visit_Lambda(self, node: ast.Lambda):
+            return
+
+    visitor = Visitor()
+    for node in nodes:
+        visitor.visit(node)
+    return keys
+
+
+def function_body_nodes(function_node: ast.AST | None) -> list[ast.AST]:
+    if not isinstance(function_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return []
+    found: list[ast.AST] = []
+
+    class Visitor(ast.NodeVisitor):
+        def visit_FunctionDef(self, node: ast.FunctionDef):
+            if node is function_node:
+                for stmt in node.body:
+                    self.visit(stmt)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+            if node is function_node:
+                for stmt in node.body:
+                    self.visit(stmt)
+
+        def visit_ClassDef(self, node: ast.ClassDef):
+            return
+
+        def visit_Lambda(self, node: ast.Lambda):
+            return
+
+        def generic_visit(self, node: ast.AST):
+            found.append(node)
+            super().generic_visit(node)
+
+    Visitor().visit(function_node)
+    return found
+
+
+def dataflow_evidence(lines: list[str], try_node: ast.AST | None, function_node: ast.AST | None) -> str:
+    if try_node is None or not isinstance(function_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return "tracked=<none>"
+    tracked = sorted(assigned_keys(list(getattr(try_node, "body", []))))
+    if not tracked:
+        return "tracked=<none>"
+
+    try_start = getattr(try_node, "lineno", 0)
+    try_end = getattr(try_node, "end_lineno", try_start)
+    all_nodes = function_body_nodes(function_node)
+    pre: list[str] = []
+    post: list[str] = []
+    seen_pre: set[tuple[str, int]] = set()
+    seen_post: set[tuple[str, int]] = set()
+
+    for node in all_nodes:
+        lineno = getattr(node, "lineno", 0)
+        if not lineno:
+            continue
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.NamedExpr, ast.For, ast.AsyncFor, ast.With)):
+            node_keys = assigned_keys([node])
+            for key in tracked:
+                if key in node_keys and lineno < try_start and (key, lineno) not in seen_pre:
+                    seen_pre.add((key, lineno))
+                    pre.append(f"{key}@{lineno}: {line_window(lines, lineno, 0, 220)}")
+        if lineno > try_end:
+            key = None
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                key = node.id
+            elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+                key = expression_key(node)
+            if key in tracked and (key, lineno) not in seen_post:
+                seen_post.add((key, lineno))
+                post.append(f"{key}@{lineno}: {line_window(lines, lineno, 0, 220)}")
+
+    # Nearest pre-try writes are usually most relevant; earliest post-handler reads show outward use.
+    pre = pre[-4:]
+    post = post[:8]
+    return (
+        f"tracked={', '.join(tracked)}; "
+        f"pre_try_writes={' | '.join(pre) if pre else '<none found>'}; "
+        f"post_handler_reads={' | '.join(post) if post else '<none found>'}"
+    )
+
+
+
+
+def loaded_keys(node: ast.AST | None) -> set[str]:
+    keys: set[str] = set()
+    if node is None:
+        return keys
+
+    class Visitor(ast.NodeVisitor):
+        def visit_Name(self, current: ast.Name):
+            if isinstance(current.ctx, ast.Load):
+                keys.add(current.id)
+
+        def visit_Attribute(self, current: ast.Attribute):
+            if isinstance(current.ctx, ast.Load):
+                key = expression_key(current)
+                if key:
+                    keys.add(key)
+            self.generic_visit(current.value)
+
+        def visit_FunctionDef(self, current: ast.FunctionDef):
+            return
+
+        def visit_AsyncFunctionDef(self, current: ast.AsyncFunctionDef):
+            return
+
+        def visit_ClassDef(self, current: ast.ClassDef):
+            return
+
+        def visit_Lambda(self, current: ast.Lambda):
+            return
+
+    Visitor().visit(node)
+    return keys
+
+
+def touches_tracked(node: ast.AST | None, tracked: set[str]) -> bool:
+    if not tracked:
+        return False
+    loaded = loaded_keys(node)
+    for key in loaded:
+        if key in tracked:
+            return True
+        # Attribute evidence can be relevant when either side is the tracked base.
+        if any(key.startswith(f"{tracked_key}.") or tracked_key.startswith(f"{key}.") for tracked_key in tracked):
+            return True
+    return False
+
+
+def expanded_semantic_hints(lines: list[str], try_node: ast.AST | None, function_node: ast.AST | None) -> str:
+    """Targeted expanded evidence for control validation and persistence/outward calls.
+
+    Keep this bounded and structural: the generic function tail remains available, but these
+    hints surface the statements most likely to prove whether a fallback/default becomes a
+    normal caller-visible result or is validated/persisted later.
+    """
+    if try_node is None or not isinstance(function_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return "post_handler_controls=<none>; post_handler_calls=<none>; persistence_calls=<none>"
+
+    tracked = set(assigned_keys(list(getattr(try_node, "body", []))))
+    if not tracked:
+        return "post_handler_controls=<none tracked>; post_handler_calls=<none tracked>; persistence_calls=<none tracked>"
+
+    try_end = getattr(try_node, "end_lineno", getattr(try_node, "lineno", 0))
+    controls: list[str] = []
+    calls: list[str] = []
+    persistence: list[str] = []
+    seen_controls: set[int] = set()
+    seen_calls: set[int] = set()
+    seen_persistence: set[int] = set()
+    persistence_words = (
+        "save", "write", "dump", "persist", "store", "commit", "cache", "update",
+        "serialize", "export", "sync", "flush", "replace", "upsert",
+    )
+
+    for node in function_body_nodes(function_node):
+        lineno = getattr(node, "lineno", 0)
+        if not lineno or lineno <= try_end:
+            continue
+
+        subject: ast.AST | None = None
+        if isinstance(node, ast.If):
+            subject = node.test
+        elif isinstance(node, ast.Assert):
+            subject = node.test
+        elif isinstance(node, ast.Return):
+            subject = node.value
+        elif isinstance(node, ast.Raise):
+            subject = node.exc
+
+        if subject is not None and touches_tracked(subject, tracked) and lineno not in seen_controls:
+            seen_controls.add(lineno)
+            controls.append(f"{lineno}: {line_window(lines, lineno, 1, 340)}")
+
+        if isinstance(node, ast.Call) and touches_tracked(node, tracked):
+            if lineno not in seen_calls:
+                seen_calls.add(lineno)
+                calls.append(f"{lineno}: {line_window(lines, lineno, 1, 320)}")
+            name = (call_name(node) or "").lower()
+            if name and any(word in name for word in persistence_words) and lineno not in seen_persistence:
+                seen_persistence.add(lineno)
+                persistence.append(f"{lineno}: {line_window(lines, lineno, 1, 360)}")
+
+    controls = controls[:5]
+    calls = calls[:6]
+    persistence = persistence[:4]
+    return (
+        f"post_handler_controls={' | '.join(controls) if controls else '<none found>'}; "
+        f"post_handler_calls={' | '.join(calls) if calls else '<none found>'}; "
+        f"persistence_calls={' | '.join(persistence) if persistence else '<none found>'}"
+    )
+
+
 def candidate_record(path: Path, lines: list[str], handler: ast.ExceptHandler, parents, stmt_lists) -> dict[str, Any]:
     try_node = nearest(handler, parents, (ast.Try, getattr(ast, "TryStar", ast.Try)))
     operation = nodes_source(lines, list(getattr(try_node, "body", [])), 850) if try_node else "<unknown>"
@@ -351,7 +620,11 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
                     continue
                 for name, pattern in patterns.items():
                     if pattern.search(line):
-                        call_index[name].append((shown, lineno, line_window(lines, lineno)))
+                        call_index[name].append((
+                            shown,
+                            lineno,
+                            line_window(lines, lineno, 2 if detail == "expanded" else 1, 620 if detail == "expanded" else 320),
+                        ))
 
     packet: list[dict[str, str]] = []
     packet_ids: list[str] = []
@@ -379,15 +652,19 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
             for caller_path, caller_line, snippet in call_index.get(function_node.name, []):
                 if caller_path == path_name and getattr(function_node, "lineno", 0) <= caller_line <= getattr(function_node, "end_lineno", 0):
                     continue
-                callers.append(f"{caller_path}:{caller_line}: {clip(snippet, 170)}")
+                callers.append(f"{caller_path}:{caller_line}: {clip(snippet, 420 if detail == "expanded" else 170)}")
                 if len(callers) >= (4 if detail == "expanded" else 2):
                     break
         expanded_tail = ""
+        dataflow = ""
+        semantic_hints = ""
         if detail == "expanded" and isinstance(function_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             tail_start = getattr(try_node, "end_lineno", end) + 1 if try_node else end + 1
             tail_end = getattr(function_node, "end_lineno", tail_start)
             tail_text = source_for_lines(lines, tail_start, tail_end)
-            expanded_tail = clip(tail_text, 1100) if tail_text.strip() else "<none>"
+            expanded_tail = clip(tail_text, 520) if tail_text.strip() else "<none>"
+            dataflow = dataflow_evidence(lines, try_node, function_node)
+            semantic_hints = expanded_semantic_hints(lines, try_node, function_node)
         evidence_text = (
             f"id: {value}\n"
             f"scope: {scope_name}\n"
@@ -398,9 +675,12 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
             f"function_returns: {return_evidence}\n"
             f"context: {context}\n"
             f"callers: {' | '.join(callers) if callers else '<none found>'}"
-            + (f"\nexpanded_function_tail: {expanded_tail}" if detail == "expanded" else "")
+            + (
+                f"\ndataflow: {dataflow}\nsemantic_hints: {semantic_hints}\nexpanded_function_tail: {expanded_tail}"
+                if detail == "expanded" else ""
+            )
         )
-        evidence_text = clip(evidence_text, 3000 if detail == "expanded" else 2100)
+        evidence_text = clip(evidence_text, 3200 if detail == "expanded" else 2100)
         projected = chars + len(evidence_text)
         if packet and projected > max_chars:
             break

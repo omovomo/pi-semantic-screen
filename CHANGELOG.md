@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.5.3 - 2026-10-03
+
+- Accept both object dispositions and compact `[id, disposition, rationale]` tuples in `screen_review_commit`; normalize them inside the extension-owned workflow before exact coverage validation, preventing a model-formatting retry without weakening fail-closed semantics.
+- Compact the self-contained `python-exceptions` review contract while preserving authoritative-record/persisted-state, UI-only, normalization, and insufficient-evidence rules; the serialized contract is regression-bounded to 2700 bytes.
+- Improve expanded Python evidence with targeted `post_handler_controls`, `post_handler_calls`, and `persistence_calls`, plus wider caller context, while keeping the same 7200-token packet budget.
+- Add regressions for tuple commits, compact-contract size/semantics, and targeted validation/core-call/persistence/caller evidence.
+
+## 0.5.2 - 2026-10-02
+
+- Propagate explicit user approval into the guarded post-approval `screen_batch` call with mandatory `confirm:true`, so batches above the call limit actually invoke the classifier instead of returning all candidates as `withheld`.
+- Fail closed before semantic review unless the canonical primary result has `status === "ok"`; `approval_required` and `error` results now require `reviewStarted:false` and must never reach `screen_review_start`.
+- Add regression contract tests for both post-approval invariants.
+
+## 0.5.1 - 2026-10-02
+
+- Fix Pi skill metadata: `skills/ask/SKILL.md` now uses the required `description` frontmatter field instead of `summary`.
+- Add a regression test that requires every shipped skill entry point to expose `name` and `description` metadata.
+
+## 0.5.0 - 2026-10-02
+
+- Move semantic-review state ownership from model-generated Code Mode bookkeeping into a process-local `ReviewWorkflowManager`.
+- Add `screen_review_start`, `screen_review_next`, and `screen_review_commit` as the canonical preset review API.
+- Make pending packet retrieval idempotent: repeated `screen_review_next` calls before commit return the same packet and do not rebuild evidence or advance queues.
+- Make commit atomic and fail-closed for stale packet IDs and non-exact disposition coverage; the extension now owns reviewed/evidence-seen accounting, expanded priority, blocked quarantine, findings, and terminal status.
+- Remove model-owned review arrays/sets from `/screen-use` and `/screen-continue`; continuation can resume the latest active workflow with zero classifier/rediscovery calls and no Code Mode state merging.
+- Keep `screen_evidence` / `screen_review_apply` as low-level compatibility APIs rather than the canonical preset workflow.
+- Clarify Python exception policy: failed authoritative persisted-state read/parse followed by a normal empty/default domain object is a finding unless that defaulting is explicitly permitted and surfaced.
+- Document process-local review-state lifetime: context compaction is safe, Pi process restart requires a fresh screen.
+
+## 0.4.0 - 2026-10-02
+
+- Add generic `screen_review_apply` to validate exact disposition coverage and return deterministic review-state deltas, removing disposition branching/coverage bookkeeping from model-generated Code Mode logic.
+- Treat bounded `screen_evidence` subsets as normal: expose `trimmed` and `trimReason`; `requested > packetIds.length` no longer triggers a retry when the returned packet itself is intact and within budget.
+- Narrow `EXPECTED_NORMALIZATION`: silently skipping malformed authoritative source records is not normalization unless omission is explicitly permitted by the source contract and surfaced.
+- Add targeted expanded Python data-flow evidence (`tracked`, `pre_try_writes`, `post_handler_reads`) to connect caught failures/fallback values to later function use.
+- Preserve per-ID blocked-evidence quarantine, 7200-token transport budget, single classifier pass, and host-managed context compaction.
+
 ## 0.3.1 - 2026-10-02
 
 - Quarantine expanded `INSUFFICIENT_EVIDENCE` per ID in `blockedEvidenceIds` instead of globally stopping semantic review.

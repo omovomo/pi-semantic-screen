@@ -29,11 +29,11 @@ export const pythonExceptionsPreset: ScreeningPreset = {
   },
   review: {
     instructions:
-      "Inspect the emitted source evidence, enclosing function context, downstream behavior, function returns, and available call sites. Mechanical syntax alone is not semantic confirmation. Absence of shown downstream evidence is not proof of no outward effect; use INSUFFICIENT_EVIDENCE when the packet cannot establish either confirmation or a terminal rejection.",
+      "Judge only emitted evidence and its function/downstream/caller context. Absence of shown downstream evidence is not proof of no outward effect; missing context is INSUFFICIENT_EVIDENCE, not NO_OUTWARD_EFFECT.",
     confirmWhen:
-      "Confirm only when the evidence establishes both hidden/changed failure semantics and a material caller-visible/default/incomplete core outward effect.",
+      "CONFIRM only when hidden/changed failure materially changes core caller-visible/default/incomplete state. Silent loss of an authoritative source record qualifies unless omission is explicitly permitted and surfaced. Failed authoritative persisted-state read/parse returning a normal empty/default domain object also qualifies unless that defaulting is explicitly permitted and surfaced.",
     rejectWhen:
-      "Reject UI/display-only stale state, logging/telemetry, cleanup, retry/reconnect, optional enrichment, expected normalization, explicit failure/unavailable states, and paths where the evidence affirmatively establishes no core outward effect. UI-only effects are not findings unless they feed back into core data/control state. Missing context is INSUFFICIENT_EVIDENCE, not NO_OUTWARD_EFFECT.",
+      "Reject explicit failure, UI/display-only, cleanup/retry/telemetry, optional enrichment, and contract-permitted surfaced normalization. UI counts only if it feeds core data/control. Silently skipping a malformed authoritative lot/transaction/record or defaulting failed authoritative persisted state is not EXPECTED_NORMALIZATION unless explicitly permitted and surfaced. Missing context is INSUFFICIENT_EVIDENCE, not NO_OUTWARD_EFFECT.",
   },
   evidence: {
     targetItems: 60,

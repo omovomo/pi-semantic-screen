@@ -163,3 +163,89 @@ test("python-exceptions evidence walks out of nested blocks and expanded detail 
     cleanup();
   }
 });
+
+
+test("expanded python exception evidence includes targeted post-handler data-flow hints", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-dataflow-"));
+  try {
+    writeFileSync(
+      join(root, "policy.py"),
+      [
+        "def evaluate():",
+        "    rsi_data = {}",
+        "    try:",
+        "        rsi_data = load_rsi()",
+        "    except Exception:",
+        "        pass",
+        "    snapshot = build_snapshot(rsi_data)",
+        "    return snapshot",
+        "",
+      ].join("\n"),
+    );
+    const rich = await pythonExceptionsAdapter.discover({ scope: root, mode: "candidates" });
+    assert.equal(rich.status, "ok");
+    const id = rich.items![0].id;
+    const expanded = await pythonExceptionsAdapter.evidence({
+      scope: root,
+      ids: [id],
+      maxItems: 10,
+      maxSources: 2,
+      maxChars: 40_000,
+      detail: "expanded",
+    });
+    assert.equal(expanded.status, "ok");
+    assert.match(expanded.items[0].evidence, /dataflow: tracked=rsi_data/);
+    assert.match(expanded.items[0].evidence, /pre_try_writes=.*rsi_data.*= \{\}/s);
+    assert.match(expanded.items[0].evidence, /post_handler_reads=.*build_snapshot\(rsi_data\)/s);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("expanded python exception evidence surfaces validation, core-call, persistence, and wider caller context", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-semantic-hints-"));
+  try {
+    writeFileSync(
+      join(root, "policy.py"),
+      [
+        "def evaluate():",
+        "    state = {}",
+        "    try:",
+        "        state = load_state()",
+        "    except OSError:",
+        "        pass",
+        "    if not state:",
+        "        mark_degraded(state)",
+        "    save_state(state)",
+        "    return publish(state)",
+        "",
+        "def caller():",
+        "    result = evaluate()",
+        "    if result:",
+        "        return result",
+        "    return None",
+        "",
+      ].join("\n"),
+    );
+    const rich = await pythonExceptionsAdapter.discover({ scope: root, mode: "candidates" });
+    assert.equal(rich.status, "ok");
+    const id = rich.items![0].id;
+    const expanded = await pythonExceptionsAdapter.evidence({
+      scope: root,
+      ids: [id],
+      maxItems: 10,
+      maxSources: 2,
+      maxChars: 40_000,
+      detail: "expanded",
+    });
+    assert.equal(expanded.status, "ok");
+    const evidence = expanded.items[0].evidence;
+    assert.match(evidence, /semantic_hints:/);
+    assert.match(evidence, /post_handler_controls=.*if not state/s);
+    assert.match(evidence, /post_handler_calls=.*mark_degraded\(state\)/s);
+    assert.match(evidence, /persistence_calls=.*save_state\(state\)/s);
+    assert.match(evidence, /callers:.*result = evaluate\(\).*if result/s);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

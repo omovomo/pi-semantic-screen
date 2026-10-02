@@ -1,63 +1,43 @@
 # Presets
 
-A preset is the lightweight unit for a semantic-screen use case when an existing adapter already provides the required source/evidence semantics.
-
-## Shape
-
-See `src/presets/types.ts`.
+A preset contains semantic policy, not source traversal or workflow-state logic.
 
 A preset defines:
 
-```ts
-{
-  id,
-  label,
-  description,
-  adapter,
-  primary: { question, criteria, threshold },
-  refinement?: { question, criteria, threshold },
-  review: { instructions, confirmWhen, rejectWhen },
-  evidence: { targetItems, maxItems, maxSources, maxChars, maxTokens }
-}
-```
+- `id`, label, description;
+- adapter ID;
+- primary classifier question / true-false criteria / threshold;
+- optional opt-in refinement stage;
+- review `instructions`, `confirmWhen`, `rejectWhen`;
+- evidence packet defaults (`targetItems`, source/character caps, token budget).
 
-The built-in `python-exceptions` preset is in `src/presets/python-exceptions.ts`.
+The canonical flow loads a preset once, screens deterministic candidates, then passes exact retained IDs to `screen_review_start`. From that point the extension owns queueing/accounting; the preset's review policy is embedded into every packet returned by `screen_review_next`.
 
-## Add a use case with an existing adapter
+## Adding a preset
 
-If the adapter's candidate/evidence representation is already appropriate, adding a new use case should normally require only:
+If an existing adapter already produces the candidate/evidence semantics you need, add only a new preset under `src/presets/` and register it. Do not clone `/screen-use` or implement a new state machine.
 
-1. one small preset file under `src/presets/`;
-2. one registry entry in `src/presets/registry.ts`;
-3. tests for the semantic policy and public preset ID;
-4. optionally a tiny alias prompt for ergonomics.
-
-Do not clone `/screen-use` or the generic review state machine.
+A use-case-specific alias prompt is optional and should stay tiny.
 
 ## Refinement
 
-Refinement is optional and opt-in. A preset can define one stricter screening stage, but `/screen-use` must not run it merely because the primary retained set is large.
-
-If refinement runs, its extra classifier calls have their own preflight/approval boundary. The workflow reports its drop yield; low yield is diagnostic and does not authorize additional classifier cascades.
-
-## Aliases
-
-Alias prompts should remain very small. Example:
-
-```text
-/screen-exceptions garp_cli/
-```
-
-is only an ergonomic alias for:
-
-```text
-/screen-use python-exceptions garp_cli/
-```
-
-The alias contains no AST parser, evidence builder, batching implementation, or use-case state machine.
-
-`maxTokens` is the primary Code Mode transport budget. `maxItems`, `maxSources`, and `maxChars` remain deterministic adapter safety caps and should not be used as a proxy for transport size.
+Refinement is opt-in. A large retained set does not authorize another classifier pass. If refinement is requested, it has its own preflight/approval boundary and produces the exact review target passed to `screen_review_start`.
 
 ## Review contract
 
-At runtime the extension combines the preset review policy with the generic disposition vocabulary and includes that `reviewContract` in every `screen_evidence` payload. Reviewers must classify every pending ID with exactly one disposition. `INSUFFICIENT_EVIDENCE` from standard detail is deliberately non-terminal and triggers a priority `detail:"expanded"` refetch; it must not be converted into a guessed finding or rejection. If expanded evidence is still insufficient, only that ID is quarantined in `blockedEvidenceIds`; unrelated review targets continue and the final workflow reports `review_complete_with_blocked_evidence` rather than pretending full semantic coverage.
+At runtime the extension combines the preset review policy with the generic disposition vocabulary:
+
+```text
+CONFIRM
+EXPLICIT_FAILURE
+UI_ONLY
+OPTIONAL_ENRICHMENT
+CLEANUP_RETRY_TELEMETRY
+EXPECTED_NORMALIZATION
+NO_OUTWARD_EFFECT
+INSUFFICIENT_EVIDENCE
+```
+
+Only `CONFIRM` creates a finding. Standard `INSUFFICIENT_EVIDENCE` is automatically routed to expanded evidence; expanded insufficiency is quarantined per ID without stopping independent targets.
+
+For `python-exceptions`, `EXPECTED_NORMALIZATION` is intentionally narrow. Silently omitting malformed authoritative records or returning a normal empty/default domain object after failed authoritative persisted-state loading is not normalization unless the outward/source contract explicitly allows and surfaces that behavior.

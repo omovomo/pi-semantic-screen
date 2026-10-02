@@ -34,51 +34,51 @@ const DISPOSITIONS: ReviewDispositionDefinition[] = [
     terminal: true,
     finding: true,
     description:
-      "Evidence establishes hidden/changed failure semantics and a material caller-visible/default/incomplete core outward effect.",
+      "Hidden/changed failure has a material caller-visible/default/incomplete core outward effect.",
   },
   {
     id: "EXPLICIT_FAILURE",
     terminal: true,
     finding: false,
-    description: "The failure is surfaced, rethrown, returned as an explicit unavailable/error state, or otherwise fail-closed.",
+    description: "Failure is surfaced, rethrown, explicit unavailable/error, or otherwise fail-closed.",
   },
   {
     id: "UI_ONLY",
     terminal: true,
     finding: false,
     description:
-      "The effect is limited to display/rendering/labels/buttons/chart refresh or other UI state and does not feed back into core data/control state.",
+      "Display/UI-only effect with no feedback into core data/control state.",
   },
   {
     id: "OPTIONAL_ENRICHMENT",
     terminal: true,
     finding: false,
-    description: "The failed work is optional enrichment whose absence cannot masquerade as a successful core result.",
+    description: "Optional enrichment whose absence cannot masquerade as core success.",
   },
   {
     id: "CLEANUP_RETRY_TELEMETRY",
     terminal: true,
     finding: false,
-    description: "The handler is limited to best-effort cleanup, retry/reconnect, logging, metrics, or telemetry.",
+    description: "Best-effort cleanup, retry/reconnect, logging, metrics, or telemetry only.",
   },
   {
     id: "EXPECTED_NORMALIZATION",
     terminal: true,
     finding: false,
-    description: "The handler performs expected input/value normalization within the documented outward contract.",
+    description: "Contract-permitted surfaced normalization; never silent loss/default of an authoritative record/state.",
   },
   {
     id: "NO_OUTWARD_EFFECT",
     terminal: true,
     finding: false,
-    description: "Evidence affirmatively establishes that suppressing the failure is local/non-observable to the core outward data/control-state contract; mere absence of shown downstream context is not enough.",
+    description: "Evidence affirmatively establishes no core outward effect; missing context is not enough.",
   },
   {
     id: "INSUFFICIENT_EVIDENCE",
     terminal: false,
     finding: false,
     description:
-      "The available packet does not establish either confirmation or a terminal rejection category; request expanded evidence instead of guessing.",
+      "Packet proves neither confirmation nor terminal rejection; request expanded evidence instead of guessing.",
   },
 ];
 
@@ -89,6 +89,6 @@ export function buildReviewContract(preset: ScreeningPreset): ReviewContract {
     rejectWhen: preset.review.rejectWhen,
     dispositions: DISPOSITIONS.map((entry) => ({ ...entry })),
     insufficientEvidenceAction:
-      "Do not add this id to reviewedIds. Add it to evidenceSeenIds, keep it pending for review coverage, and refetch it with screen_evidence detail=expanded before reviewing new standard-detail ids.",
+      "Use INSUFFICIENT_EVIDENCE; screen_review_commit keeps it unreviewed and automatically prioritizes expanded evidence.",
   };
 }

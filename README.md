@@ -1,31 +1,43 @@
 # pi-semantic-screen
 
-Adapter-driven semantic screening for Pi Code Mode: cheaply classify many candidates, then perform bounded resumable deep review over deterministic evidence.
+Adapter-driven semantic screening for Pi: cheaply classify many candidates, then perform bounded deep review over deterministic evidence.
 
-Version **0.3.1** keeps the contract-driven review from 0.3.0 and changes expanded-evidence failure from a global stop into a per-ID fail-closed quarantine, so independent review targets continue.
+Version **0.5.3** keeps the proven 0.5.x primary/review state machine and focuses on review robustness and evidence efficiency. `screen_review_commit` now tolerates compact tuple-form dispositions as well as objects, the review contract is smaller but still self-contained, and expanded Python evidence surfaces targeted validation/core-call/persistence/caller context before falling back to generic function-tail text.
 
-## Why 0.3.x
-
-Early releases proved the classifier path but also exposed a scaling problem: a rich `/screen-exceptions` prompt repeatedly asked the parent model to generate Python AST/evidence scripts. That made extraction inconsistent and expensive.
-
-0.3.x separates concerns, preserves hardened evidence transport, and carries explicit semantic-review policy with every evidence packet:
+## Architecture at a glance
 
 ```text
-screen_batch / screen_preflight   generic classifier engine
-screen_preset                     semantic policy
-screen_discover                   deterministic adapter discovery
-screen_evidence                   deterministic bounded review evidence
-/screen-use                       generic workflow
-/screen-exceptions                short alias only
+screen_preset / screen_preflight / screen_batch   generic screening
+                    |
+                    v
+screen_review_start                               create extension-owned workflow
+                    |
+                    v
+screen_review_next  --> evidence + reviewContract
+                    |
+                    v
+parent model       --> {id, disposition, rationale} × N
+                    |
+                    v
+screen_review_commit                              atomic state transition
+                    |
+                    +--> next packet / complete / complete-with-blocked
 ```
 
-For a future use case, **do not create another large prompt**. If an existing adapter fits, add a small preset. Only new source semantics require a new adapter.
+Use cases stay small:
+
+- semantic policy belongs in a **preset**;
+- deterministic source discovery/evidence belongs in an **adapter**;
+- generic screening stays in `screen_batch`;
+- review accounting/state ownership stays in the extension.
+
+Do not create a new large `/screen-foo` prompt for every use case. If an existing adapter fits, add a preset. Only genuinely new source semantics require a new adapter.
 
 See [Architecture](docs/architecture.md), [Adapters](docs/adapters.md), and [Presets](docs/presets.md).
 
 ## Requirements
 
-- Node.js 22.19+ (same baseline as current Pi).
+- Node.js 22.19+.
 - Pi with Code Mode and a configured classifier model for `screen_batch`.
 - Python 3.9+ only for the built-in `python-exceptions` adapter. No third-party Python packages are required.
 
@@ -43,13 +55,11 @@ One-off local load:
 pi -e ./pi-semantic-screen
 ```
 
-GitHub release tag:
+GitHub tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.3.1
+pi install git:github.com/<owner>/pi-semantic-screen@v0.5.3
 ```
-
-Pi packages are designed to distribute extensions, skills, and prompt templates together, including installation from git/npm/local sources. Host Pi packages are declared as peer dependencies rather than bundled runtime dependencies.
 
 See [Git installation and repository setup](docs/git-install.md).
 
@@ -67,29 +77,31 @@ Equivalent generic command:
 /screen-use python-exceptions garp_cli/
 ```
 
-Optional explicit refinement stage:
+Optional explicit refinement:
 
 ```text
 /screen-use python-exceptions garp_cli/ --refine
 ```
 
-Continue an incomplete semantic review without rediscovery or classifier calls:
+For guarded batches above the configured call limit, `/screen-use` stops at preflight for explicit approval. After approval the canonical primary `screen_batch` is invoked with `confirm:true`; if it still returns a non-`ok` status, review is not started.
+
+Continue an incomplete semantic review:
 
 ```text
 /screen-continue
 ```
 
-List/load presets from Code Mode with `screen_preset`. The first built-in preset is `python-exceptions`.
+`/screen-continue` makes zero classifier calls and zero rediscovery passes. It resumes the latest extension-owned review workflow in the current Pi process.
 
 ## Tool model
 
 ### `screen_preset`
 
-Lists installed presets or returns one preset's adapter, classifier stages, review policy, and evidence limits.
+Lists presets or returns one preset's adapter, classifier stages, review policy, and evidence limits.
 
 ### `screen_discover`
 
-Runs deterministic adapter discovery:
+Deterministic adapter discovery:
 
 ```ts
 await tools.screen_discover({
@@ -99,35 +111,21 @@ await tools.screen_discover({
 });
 ```
 
-Count mode is intended for preflight and returns no rich candidate array. Candidates mode returns stable `{id,text}` items for `screen_batch`.
+Count mode is for preflight and returns no rich candidate array. Candidate mode returns stable `{id,text}` items for `screen_batch`.
 
 ### `screen_preflight`
 
-Zero-call guard:
+Zero-classifier-call guard:
 
 ```ts
 await tools.screen_preflight({ count: 524 });
 ```
 
-Default call limit is 200. Above it, the workflow must obtain explicit user approval before classifier calls.
+Default call limit is 200. Above it, explicit user approval is required before classifier calls.
 
 ### `screen_batch`
 
-Generic boolean classifier primitive:
-
-```ts
-await tools.screen_batch({
-  items: [{ id: "stable-id", text: "candidate evidence" }],
-  question: "Should this candidate be retained?",
-  criteria: {
-    true: "Retain for deeper review.",
-    false: "Safe to exclude from deeper review."
-  },
-  threshold: 0.70
-});
-```
-
-For bool probability `p` and threshold `t`:
+Generic boolean classifier primitive. For probability `p` and threshold `t`:
 
 ```text
 p >= t       => kept
@@ -141,27 +139,124 @@ Every input ID ends in exactly one bucket:
 kept | dropped | undecided | withheld | errors
 ```
 
-Errors and aborts never become `dropped`.
+Errors and aborts never become `dropped`. Successful identical runs are reused from a small process-local result cache; `rescreen:true` explicitly bypasses reuse.
 
-Successful identical runs are reused from a small process-local in-memory cache. `rescreen:true` is reserved for an explicit fresh-run request.
+### `screen_review_start`
 
-### `screen_evidence`
-
-Produces a deterministic bounded review packet from stable IDs:
+Creates the extension-owned semantic-review workflow from the exact retained IDs:
 
 ```ts
-await tools.screen_evidence({
+await tools.screen_review_start({
   preset: "python-exceptions",
   scope: "garp_cli/",
-  ids: remainingIds,
-  maxItems: 80,
-  maxSources: 10,
-  maxChars: 120000,
-  maxTokens: 7200
+  reviewTargetIds
 });
 ```
 
-The returned `packetIds` are authoritative. `screen_evidence` token-bounds the exact structured payload before Code Mode transport, returns `tokenBudget` and `estimatedTokens`, trims only at whole-item boundaries, and includes an explicit `reviewContract`. Standard evidence can be refetched with `detail:"expanded"` when the reviewer returns `INSUFFICIENT_EVIDENCE`. Review accounting must never assume that all requested IDs fit the packet.
+It returns a compact `workflowId` and progress. From this point onward the model must not maintain review accounting itself.
+
+### `screen_review_next`
+
+Returns the current evidence packet:
+
+```ts
+await tools.screen_review_next({ workflowId });
+```
+
+Omitting `workflowId` resumes the latest review workflow in the current Pi session/process.
+
+Properties:
+
+- expanded-evidence IDs are prioritized automatically;
+- otherwise remaining targets are selected in stable order;
+- evidence is token-bounded (built-in preset: 7200 estimated tokens);
+- trimming occurs only at whole-item boundaries;
+- the packet carries the explicit `reviewContract`;
+- repeated `screen_review_next` calls before commit return the **same** pending `packetId` and evidence rather than advancing or rebuilding it.
+
+### `screen_review_commit`
+
+Atomically validates dispositions for the current pending packet and advances review state:
+
+```ts
+await tools.screen_review_commit({
+  workflowId,
+  packetId,
+  dispositions: [
+    {
+      id: "garp_cli/example.py:10-12",
+      disposition: "CONFIRM",
+      rationale: "The failed authoritative read becomes a normal default result."
+    }
+  ]
+});
+```
+
+The extension validates exact ID coverage and owns all state transitions:
+
+```text
+terminal disposition        -> evidenceSeen + reviewed
+standard INSUFFICIENT       -> evidenceSeen + expanded queue
+expanded INSUFFICIENT       -> evidenceSeen + blocked quarantine, not reviewed
+CONFIRM                     -> finding
+```
+
+Missing, duplicate, extra, or stale packet dispositions fail closed and do not advance state. For robustness, commit accepts either the object form above or the equivalent compact tuple `[id, disposition, rationale]`; both normalize to the same exact-coverage validator before any state transition.
+
+### Low-level `screen_evidence` / `screen_review_apply`
+
+These remain available for tests, custom integrations, and ad-hoc low-level workflows. Canonical preset workflows use `screen_review_start` / `screen_review_next` / `screen_review_commit` so review state ownership stays inside the extension.
+
+## Review state ownership
+
+The extension keeps exact process-local review state:
+
+```text
+reviewTargetIds
+reviewedIds
+evidenceSeenIds
+needsExpandedEvidenceIds
+blockedEvidence
+findings
+pending packet + packetId
+cumulative disposition counts
+```
+
+Important invariants:
+
+```text
+reviewedIds ⊆ evidenceSeenIds
+blockedEvidenceIds ⊆ evidenceSeenIds
+blockedEvidenceIds ∩ reviewedIds = ∅
+only CONFIRM creates findings
+pending packet cannot advance without an exact commit
+expanded insufficient evidence blocks only that ID
+```
+
+The model never serializes or merges these sets. This eliminates model-generated set arithmetic, stale expanded queues, accidental duplicate packets, empty-ID fetches, and manual state-merge errors.
+
+Review state survives normal turns and host context compaction because it is owned by the extension process. **Restarting Pi clears active review workflows.** Start a fresh screen after a process restart.
+
+## Review contract
+
+Every evidence packet includes a compact, self-contained review contract plus a fixed disposition vocabulary. The contract is included in the 7200-token transport budget rather than treated as free overhead.
+
+
+- `CONFIRM`
+- `EXPLICIT_FAILURE`
+- `UI_ONLY`
+- `OPTIONAL_ENRICHMENT`
+- `CLEANUP_RETRY_TELEMETRY`
+- `EXPECTED_NORMALIZATION`
+- `NO_OUTWARD_EFFECT`
+- `INSUFFICIENT_EVIDENCE`
+
+`NO_OUTWARD_EFFECT` requires affirmative evidence of locality; missing context is `INSUFFICIENT_EVIDENCE`.
+
+For `python-exceptions`, normalization is intentionally narrow:
+
+- silently dropping a malformed authoritative lot/transaction/record from a normal returned core object is **not** expected normalization unless omission is explicitly allowed and surfaced;
+- failed read/parse of authoritative persisted domain state followed by returning an empty/default domain object as normal usable state is **CONFIRM**, not `EXPECTED_NORMALIZATION`, unless that defaulting is explicitly part of the outward contract and surfaced.
 
 ## Built-in `python-exceptions` adapter
 
@@ -171,44 +266,20 @@ Candidate identity:
 relative/path.py:start-end
 ```
 
-Each candidate includes:
+Candidate/evidence data includes:
 
 - enclosing function/class scope;
 - caught exception type;
 - relevant `try` operation;
 - handler body;
-- immediate downstream context.
+- downstream/continuation context;
+- function returns and lightweight call-site hints;
+- expanded targeted data-flow hints: `tracked`, `pre_try_writes`, `post_handler_reads`;
+- expanded semantic hints: `post_handler_controls`, `post_handler_calls`, `persistence_calls`;
+- wider bounded caller context for unresolved cases;
+- bounded function-tail context as a final generic fallback.
 
-Review evidence additionally includes compact enclosing function context/signature, function-return/continuation context, and lightweight call-site evidence without repeating most of the function body. Expanded detail adds a bounded tail of the containing function for unresolved cases. The adapter fails closed on unreadable/unparseable Python sources instead of silently dropping them.
-
-The adapter is bundled code, not model-generated Python, and is invoked directly without PowerShell.
-
-## Generic review accounting
-
-Exact resumable state is stored under:
-
-```text
-semantic_screen_review_state
-```
-
-Important invariants:
-
-```text
-retained = kept + undecided + withheld + errors
-pendingPacketIds are not evidenceSeen until complete parent disposition
-terminal dispositions advance reviewedIds and evidenceSeenIds
-INSUFFICIENT_EVIDENCE from standard detail advances evidenceSeenIds only and triggers detail=expanded
-INSUFFICIENT_EVIDENCE after expanded detail moves to blockedEvidenceIds and remains unreviewed
-reviewedIds ⊆ evidenceSeenIds
-blockedEvidenceIds ⊆ evidenceSeenIds
-blockedEvidenceIds ∩ reviewedIds = ∅
-reviewableRemaining = reviewTargetIds - reviewedIds - blockedEvidenceIds
-semanticallyReviewed = |unique reviewedIds|
-unreviewed = reviewTarget - semanticallyReviewed
-resumeAvailable=false when no actionable IDs remain; final status distinguishes complete vs review_complete_with_blocked_evidence
-```
-
-Candidate text and raw evidence are not stored in the resumable state. A truncated or item-ID-mismatched packet cannot advance `evidenceSeenIds` or `reviewedIds`; it is retried with a lower token budget. Expanded evidence that is still insufficient is quarantined per-ID in `blockedEvidenceIds`; it cannot become reviewed or a finding, but it also cannot stall unrelated review targets.
+The adapter is bundled deterministic Python, not model-generated code. It fails closed on unreadable/unparseable sources and stale IDs.
 
 ## Classifier selection
 
@@ -233,81 +304,50 @@ PI_SEMANTIC_SCREEN_CONCURRENCY=12
 PI_SEMANTIC_SCREEN_PYTHON=C:\Path\To\python.exe
 ```
 
-Context compaction defaults to the host/Pi context manager. `PI_SEMANTIC_SCREEN_COMPACT_THRESHOLD` only enables extension-requested compaction when explicitly set to a positive integer; unset or `0` defers to the host.
+Context compaction defaults to host/Pi context management. `PI_SEMANTIC_SCREEN_COMPACT_THRESHOLD` enables extension-requested compaction only when explicitly set to a positive integer; unset or `0` defers to the host.
 
-## Classifier usage accounting
+## Usage accounting
 
-When the classifier runtime reports usage for every call, `screen_batch` aggregates exact classifier token/cost usage and exposes it as tool-result usage. If any call lacks usage, the result marks accounting incomplete rather than inventing totals.
+When every classifier call reports usage, `screen_batch` aggregates exact classifier token/cost usage and publishes it as tool-result usage. If any call omits usage, accounting is marked incomplete rather than fabricated.
 
 Process-local result reuse reports zero new classifier usage.
 
 ## Security and egress
 
-Remote classifier egress is limited to the explicit `screen_batch` item text, question, and criteria after conservative redaction. Recognized bearer/API token forms, common vendor token prefixes, private-key blocks, and similar patterns are replaced before classification.
+Remote classifier egress is limited to explicit `screen_batch` item text, question, and criteria after conservative redaction.
 
-`screen_discover` and `screen_evidence` are local read-only adapter operations. The Python adapter does not use the network.
+Discovery, evidence extraction, review-state transitions, and review commit are local. The Python adapter does not use the network. Active review evidence may be retained temporarily in process memory only while a packet is pending; it is dropped after commit.
 
 See [SECURITY.md](SECURITY.md).
 
 ## Repository layout
 
 ```text
-extensions/screen.ts              Pi tools + classifier integration
-src/engine.ts                     generic classifier engine
-src/adapters/                     deterministic source integrations
-src/presets/                      semantic policy definitions
-skills/ask/SKILL.md               generic workflow instructions
-prompts/screen-use.md             generic preset command
-prompts/screen-exceptions.md      short alias
-prompts/screen-continue.md        resumable review
-prompts/screen.md                 ad-hoc fallback
-docs/                             architecture/development docs
-test/                             offline contract/integration tests
+extensions/screen.ts          Pi tools and runtime integration
+src/engine.ts                 generic classifier engine
+src/preflight.ts              zero-call guard
+src/cache.ts                  process-local screening result cache
+src/evidence-budget.ts        token-bounded evidence transport
+src/review-contract.ts        disposition vocabulary / preset contract
+src/review-apply.ts           pure exact disposition validation
+src/review-workflow.ts        extension-owned review state machine
+src/adapters/                 deterministic source adapters
+src/presets/                  semantic policy presets
+skills/ask/SKILL.md           generic orchestration rules
+prompts/                      short user commands/aliases
+test/                         unit/contract/integration tests
 ```
-
-## Adding a use case
-
-If an adapter already represents the right candidates/evidence:
-
-```text
-new preset
-+ registry entry
-+ tests
-```
-
-If the source semantics are new:
-
-```text
-new adapter
-+ preset
-+ tests
-```
-
-A new use case should **not** require copying the generic workflow into another prompt. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Development
 
+From a clean clone:
+
 ```sh
-npm ci --ignore-scripts
+npm ci
 npm run check
 npm run pack:dry
 ```
 
-With a matching Pi host:
+`package-lock.json` is committed intentionally for reproducible CI/development dependencies.
 
-```sh
-npm run typecheck
-npm run test:codemode
-```
-
-See [Testing](docs/testing.md).
-
-## Pi API / packaging notes
-
-The package follows Pi's current package model: extensions/skills/prompts can be bundled in one package and installed from local, npm, or git sources. Runtime Pi packages supplied by the host are peer dependencies.
-
-The classifier integration uses an extension-owned lazy `ModelRuntime` because classifier operations are provided by the model runtime rather than the extension `modelRegistry` compatibility facade. The runtime is refreshed without model-network discovery before selection.
-
-## License
-
-Licensed under the MIT License. See `LICENSE`.
+See [Testing](docs/testing.md) and [CONTRIBUTING.md](CONTRIBUTING.md).

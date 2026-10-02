@@ -53,6 +53,7 @@ declare module "@earendil-works/pi-coding-agent" {
       parameters: unknown;
       outputSchema?: unknown;
       annotations?: Record<string, unknown>;
+      executionMode?: "sequential" | "parallel";
       execute: (
         toolCallId: string,
         params: any,

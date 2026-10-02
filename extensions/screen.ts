@@ -19,6 +19,12 @@ import { getAdapter } from "../src/adapters/registry.ts";
 import { getPreset, listPresets } from "../src/presets/registry.ts";
 import { boundEvidenceByTokens } from "../src/evidence-budget.ts";
 import { buildReviewContract } from "../src/review-contract.ts";
+import {
+  applyReviewDispositions,
+  type ReviewDecision,
+  type ReviewDecisionInput,
+} from "../src/review-apply.ts";
+import { ReviewWorkflowManager, type ReviewEvidencePacket } from "../src/review-workflow.ts";
 
 const DEFAULT_PROVIDER_MODEL: readonly [string, string] = ["openrouter", "typesafe/jev-1.13"];
 const PROVIDER_ORDER = ["openrouter", "typesafe", "opencode", "vercel-ai-gateway", "cloudflare-workers-ai"];
@@ -68,7 +74,7 @@ function agentMessageText(message: unknown): string {
 }
 
 function isSemanticScreenPrompt(prompt: string): boolean {
-  return /semantic_screen_review_state|screen_preset|screen_discover|screen_evidence|screen_preflight|screen_batch|screen-use|screen-exceptions|screen-continue/i.test(prompt);
+  return /semantic_screen_review_state|screen_preset|screen_discover|screen_evidence|screen_review_apply|screen_review_start|screen_review_next|screen_review_commit|screen_preflight|screen_batch|screen-use|screen-exceptions|screen-continue/i.test(prompt);
 }
 
 function isSemanticScreenComplete(text: string): boolean {
@@ -443,6 +449,13 @@ const evidenceOutputSchema = Type.Object(
     chars: Type.Integer({ minimum: 0 }),
     tokenBudget: Type.Integer({ minimum: 1 }),
     estimatedTokens: Type.Integer({ minimum: 0 }),
+    trimmed: Type.Boolean(),
+    trimReason: Type.Union([
+      Type.Literal("none"),
+      Type.Literal("adapter_bounds"),
+      Type.Literal("token_budget"),
+      Type.Literal("adapter_and_token_budget"),
+    ]),
     items: Type.Array(
       Type.Object(
         { id: Type.String(), source: Type.String(), evidence: Type.String() },
@@ -457,6 +470,211 @@ const evidenceOutputSchema = Type.Object(
         ),
       ),
     ),
+  },
+  { additionalProperties: false },
+);
+
+const reviewDecisionInputSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1 }),
+    disposition: Type.Union([
+      Type.Literal("CONFIRM"),
+      Type.Literal("EXPLICIT_FAILURE"),
+      Type.Literal("UI_ONLY"),
+      Type.Literal("OPTIONAL_ENRICHMENT"),
+      Type.Literal("CLEANUP_RETRY_TELEMETRY"),
+      Type.Literal("EXPECTED_NORMALIZATION"),
+      Type.Literal("NO_OUTWARD_EFFECT"),
+      Type.Literal("INSUFFICIENT_EVIDENCE"),
+    ]),
+    rationale: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false },
+);
+
+const reviewDecisionTupleSchema = Type.Tuple([
+  Type.String({ minLength: 1 }),
+  Type.Union([
+    Type.Literal("CONFIRM"),
+    Type.Literal("EXPLICIT_FAILURE"),
+    Type.Literal("UI_ONLY"),
+    Type.Literal("OPTIONAL_ENRICHMENT"),
+    Type.Literal("CLEANUP_RETRY_TELEMETRY"),
+    Type.Literal("EXPECTED_NORMALIZATION"),
+    Type.Literal("NO_OUTWARD_EFFECT"),
+    Type.Literal("INSUFFICIENT_EVIDENCE"),
+  ]),
+  Type.String({ minLength: 1 }),
+]);
+
+const reviewDecisionCommitSchema = Type.Union([reviewDecisionInputSchema, reviewDecisionTupleSchema]);
+
+const reviewApplyParameters = Type.Object(
+  {
+    preset: Type.String({ minLength: 1 }),
+    detail: Type.Union([Type.Literal("standard"), Type.Literal("expanded")]),
+    packetIds: Type.Array(Type.String({ minLength: 1 }), { minItems: 1 }),
+    dispositions: Type.Array(reviewDecisionInputSchema, { minItems: 1 }),
+  },
+  { additionalProperties: false },
+);
+
+const reviewApplyOutputSchema = Type.Object(
+  {
+    status: Type.Union([Type.Literal("ok"), Type.Literal("error")]),
+    preset: Type.String(),
+    detail: Type.Union([Type.Literal("standard"), Type.Literal("expanded")]),
+    packetIds: Type.Array(Type.String()),
+    reviewedIds: Type.Array(Type.String()),
+    evidenceSeenIds: Type.Array(Type.String()),
+    needsExpandedEvidenceIds: Type.Array(Type.String()),
+    blockedEvidence: Type.Array(
+      Type.Object({ id: Type.String(), rationale: Type.String() }, { additionalProperties: false }),
+    ),
+    findings: Type.Array(
+      Type.Object({ id: Type.String(), rationale: Type.String() }, { additionalProperties: false }),
+    ),
+    dispositionCounts: Type.Object(
+      {
+        CONFIRM: Type.Integer({ minimum: 0 }),
+        EXPLICIT_FAILURE: Type.Integer({ minimum: 0 }),
+        UI_ONLY: Type.Integer({ minimum: 0 }),
+        OPTIONAL_ENRICHMENT: Type.Integer({ minimum: 0 }),
+        CLEANUP_RETRY_TELEMETRY: Type.Integer({ minimum: 0 }),
+        EXPECTED_NORMALIZATION: Type.Integer({ minimum: 0 }),
+        NO_OUTWARD_EFFECT: Type.Integer({ minimum: 0 }),
+        INSUFFICIENT_EVIDENCE: Type.Integer({ minimum: 0 }),
+      },
+      { additionalProperties: false },
+    ),
+    issues: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
+
+const reviewWorkflowProgressSchema = Type.Object(
+  {
+    reviewTarget: Type.Integer({ minimum: 0 }),
+    semanticallyReviewed: Type.Integer({ minimum: 0 }),
+    evidenceSeen: Type.Integer({ minimum: 0 }),
+    blockedEvidence: Type.Integer({ minimum: 0 }),
+    needsExpandedEvidence: Type.Integer({ minimum: 0 }),
+    reviewableRemaining: Type.Integer({ minimum: 0 }),
+    confirmed: Type.Integer({ minimum: 0 }),
+    unreviewed: Type.Integer({ minimum: 0 }),
+    resumeAvailable: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+const reviewFindingSchema = Type.Object(
+  { id: Type.String(), rationale: Type.String() },
+  { additionalProperties: false },
+);
+
+const reviewStartParameters = Type.Object(
+  {
+    preset: Type.String({ minLength: 1 }),
+    scope: Type.String({ minLength: 1 }),
+    reviewTargetIds: Type.Array(Type.String({ minLength: 1 })),
+  },
+  { additionalProperties: false },
+);
+
+const reviewStartOutputSchema = Type.Object(
+  {
+    status: Type.Union([Type.Literal("ok"), Type.Literal("error")]),
+    workflowId: Type.Optional(Type.String()),
+    preset: Type.String(),
+    scope: Type.String(),
+    progress: Type.Optional(reviewWorkflowProgressSchema),
+    issues: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
+const reviewNextParameters = Type.Object(
+  { workflowId: Type.Optional(Type.String({ minLength: 1 })) },
+  { additionalProperties: false },
+);
+
+const reviewNextOutputSchema = Type.Object(
+  {
+    status: Type.Union([
+      Type.Literal("packet"),
+      Type.Literal("complete"),
+      Type.Literal("review_complete_with_blocked_evidence"),
+      Type.Literal("error"),
+    ]),
+    workflowId: Type.Optional(Type.String()),
+    packetId: Type.Optional(Type.String()),
+    preset: Type.Optional(Type.String()),
+    scope: Type.Optional(Type.String()),
+    progress: Type.Optional(reviewWorkflowProgressSchema),
+    packet: Type.Optional(evidenceOutputSchema),
+    findings: Type.Optional(Type.Array(reviewFindingSchema)),
+    blockedEvidence: Type.Optional(Type.Array(reviewFindingSchema)),
+    dispositionCounts: Type.Optional(
+      Type.Object(
+        {
+          CONFIRM: Type.Integer({ minimum: 0 }),
+          EXPLICIT_FAILURE: Type.Integer({ minimum: 0 }),
+          UI_ONLY: Type.Integer({ minimum: 0 }),
+          OPTIONAL_ENRICHMENT: Type.Integer({ minimum: 0 }),
+          CLEANUP_RETRY_TELEMETRY: Type.Integer({ minimum: 0 }),
+          EXPECTED_NORMALIZATION: Type.Integer({ minimum: 0 }),
+          NO_OUTWARD_EFFECT: Type.Integer({ minimum: 0 }),
+          INSUFFICIENT_EVIDENCE: Type.Integer({ minimum: 0 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    issues: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
+const reviewCommitParameters = Type.Object(
+  {
+    workflowId: Type.Optional(Type.String({ minLength: 1 })),
+    packetId: Type.String({ minLength: 1 }),
+    dispositions: Type.Array(reviewDecisionCommitSchema, { minItems: 1 }),
+  },
+  { additionalProperties: false },
+);
+
+const reviewCommitOutputSchema = Type.Object(
+  {
+    status: Type.Union([
+      Type.Literal("ready"),
+      Type.Literal("complete"),
+      Type.Literal("review_complete_with_blocked_evidence"),
+      Type.Literal("error"),
+    ]),
+    workflowId: Type.Optional(Type.String()),
+    packetId: Type.Optional(Type.String()),
+    progress: Type.Optional(reviewWorkflowProgressSchema),
+    newFindings: Type.Array(reviewFindingSchema),
+    newBlockedEvidence: Type.Array(reviewFindingSchema),
+    findings: Type.Optional(Type.Array(reviewFindingSchema)),
+    blockedEvidence: Type.Optional(Type.Array(reviewFindingSchema)),
+    dispositionCounts: Type.Optional(
+      Type.Object(
+        {
+          CONFIRM: Type.Integer({ minimum: 0 }),
+          EXPLICIT_FAILURE: Type.Integer({ minimum: 0 }),
+          UI_ONLY: Type.Integer({ minimum: 0 }),
+          OPTIONAL_ENRICHMENT: Type.Integer({ minimum: 0 }),
+          CLEANUP_RETRY_TELEMETRY: Type.Integer({ minimum: 0 }),
+          EXPECTED_NORMALIZATION: Type.Integer({ minimum: 0 }),
+          NO_OUTWARD_EFFECT: Type.Integer({ minimum: 0 }),
+          INSUFFICIENT_EVIDENCE: Type.Integer({ minimum: 0 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+    issues: Type.Array(Type.String()),
   },
   { additionalProperties: false },
 );
@@ -520,13 +738,66 @@ const parameters = Type.Object(
   { additionalProperties: false },
 );
 
+
+async function buildEvidencePacket(request: {
+  preset: string;
+  scope: string;
+  ids: string[];
+  maxItems?: number;
+  maxSources?: number;
+  maxChars?: number;
+  maxTokens?: number;
+  detail?: "standard" | "expanded";
+  signal?: AbortSignal;
+}): Promise<ReviewEvidencePacket> {
+  const preset = getPreset(request.preset);
+  const adapter = getAdapter(preset.adapter);
+  const detail = request.detail ?? "standard";
+  const result = await adapter.evidence({
+    scope: request.scope,
+    ids: request.ids,
+    maxItems: request.maxItems ?? preset.evidence.maxItems,
+    maxSources: request.maxSources ?? preset.evidence.maxSources,
+    maxChars: request.maxChars ?? preset.evidence.maxChars,
+    detail,
+    signal: request.signal,
+  });
+  const reviewContract = buildReviewContract(preset);
+  const bounded = boundEvidenceByTokens(
+    result,
+    request.maxTokens ?? preset.evidence.maxTokens,
+    estimateClassifierTokens,
+    { preset: preset.id, detail, reviewContract },
+  );
+  const adapterTrimmed = result.status === "ok" && result.packetIds.length < result.requested;
+  const tokenTrimmed = result.status === "ok" && bounded.status === "ok" && bounded.packetIds.length < result.packetIds.length;
+  const trimReason =
+    adapterTrimmed && tokenTrimmed
+      ? "adapter_and_token_budget"
+      : tokenTrimmed
+        ? "token_budget"
+        : adapterTrimmed
+          ? "adapter_bounds"
+          : "none";
+  return {
+    ...bounded,
+    preset: preset.id,
+    detail,
+    reviewContract,
+    trimmed: bounded.status === "ok" && bounded.packetIds.length < bounded.requested,
+    trimReason,
+  } as ReviewEvidencePacket;
+}
+
 export default function semanticScreenExtension(pi: ExtensionAPI) {
   let semanticScreenWorkflowActive = false;
   let compactionInFlight = false;
+  const reviewWorkflows = new ReviewWorkflowManager();
 
   pi.on("session_start", () => {
     semanticScreenWorkflowActive = false;
     compactionInFlight = false;
+    reviewWorkflows.reset();
   });
 
   pi.on("before_agent_start", (event) => {
@@ -560,7 +831,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         compactionInFlight = true;
         ctx.compact({
           customInstructions:
-            "Preserve the user's semantic-screen task, approvals, exact compact screening/review counts, confirmed findings, and resumable-state semantics. Exact review accounting lives in Code Mode store key semantic_screen_review_state. Drop superseded raw evidence/source excerpts and intermediate orchestration/tool chatter. Do not invent reviewed IDs, evidence coverage, or findings.",
+            "Preserve the user's semantic-screen task, approvals, exact compact screening/review counts, confirmed findings, and resumable-state semantics. Exact review accounting lives in the extension-owned review workflow state behind screen_review_start/next/commit. Preserve the active workflow id if visible. Drop superseded raw evidence/source excerpts and intermediate orchestration/tool chatter. Do not invent reviewed IDs, evidence coverage, blocked items, or findings.",
           onComplete: () => {
             compactionInFlight = false;
           },
@@ -662,34 +933,152 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         maxTokens?: number;
         detail?: "standard" | "expanded";
       };
+      const structuredResult = await buildEvidencePacket({ ...request, signal });
       const preset = getPreset(request.preset);
-      const adapter = getAdapter(preset.adapter);
-      const result = await adapter.evidence({
-        scope: request.scope,
-        ids: request.ids,
-        maxItems: request.maxItems ?? preset.evidence.maxItems,
-        maxSources: request.maxSources ?? preset.evidence.maxSources,
-        maxChars: request.maxChars ?? preset.evidence.maxChars,
-        detail: request.detail ?? "standard",
-        signal,
-      });
-      const detail = request.detail ?? "standard";
-      const reviewContract = buildReviewContract(preset);
-      const bounded = boundEvidenceByTokens(
-        result,
-        request.maxTokens ?? preset.evidence.maxTokens,
-        estimateClassifierTokens,
-        { preset: preset.id, detail, reviewContract },
-      );
-      const structuredResult = { ...bounded, preset: preset.id, detail, reviewContract };
       const text =
-        bounded.status === "ok"
-          ? `screen_evidence: preset=${preset.id}, detail=${detail}, packet=${bounded.packetIds.length}/${bounded.requested}, sources=${bounded.sourceCount}, chars=${bounded.chars}, tokens~${bounded.estimatedTokens}/${bounded.tokenBudget}`
-          : `screen_evidence: preset=${preset.id} failed with ${bounded.issues?.length ?? 0} issue(s)`;
+        structuredResult.status === "ok"
+          ? `screen_evidence: preset=${preset.id}, detail=${structuredResult.detail}, packet=${structuredResult.packetIds.length}/${String(structuredResult.requested ?? structuredResult.packetIds.length)}, sources=${String(structuredResult.sourceCount ?? 0)}, chars=${String(structuredResult.chars ?? 0)}, tokens~${String(structuredResult.estimatedTokens ?? 0)}/${String(structuredResult.tokenBudget ?? preset.evidence.maxTokens)}, trim=${String(structuredResult.trimReason ?? "none")}`
+          : `screen_evidence: preset=${preset.id} failed`;
       return {
         content: [{ type: "text", text }],
-        details: { preset: preset.id, adapter: adapter.id },
+        details: { preset: preset.id, adapter: preset.adapter },
         structuredContent: structuredResult as unknown as JsonValue,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "screen_review_apply",
+    label: "Semantic review apply",
+    description:
+      "Validate exact semantic-review disposition coverage for one evidence packet and return a deterministic state delta. Makes no model, classifier, discovery, or evidence calls.",
+    promptSnippet: "Validate semantic-review dispositions and compute exact review state delta",
+    parameters: reviewApplyParameters,
+    outputSchema: reviewApplyOutputSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async execute(_toolCallId, params) {
+      const request = params as {
+        preset: string;
+        detail: "standard" | "expanded";
+        packetIds: string[];
+        dispositions: ReviewDecision[];
+      };
+      const preset = getPreset(request.preset);
+      const result = applyReviewDispositions({
+        packetIds: request.packetIds,
+        detail: request.detail,
+        dispositions: request.dispositions,
+      });
+      const structuredResult = { ...result, preset: preset.id };
+      const text =
+        result.status === "ok"
+          ? `screen_review_apply: preset=${preset.id}, detail=${request.detail}, packet=${result.packetIds.length}, reviewed=${result.reviewedIds.length}, expanded=${result.needsExpandedEvidenceIds.length}, blocked=${result.blockedEvidence.length}, findings=${result.findings.length}`
+          : `screen_review_apply: preset=${preset.id} rejected dispositions with ${result.issues.length} issue(s)`;
+      return {
+        content: [{ type: "text", text }],
+        details: { preset: preset.id },
+        structuredContent: structuredResult as unknown as JsonValue,
+      };
+    },
+  });
+
+
+  pi.registerTool({
+    name: "screen_review_start",
+    label: "Semantic review start",
+    description:
+      "Create an extension-owned semantic-review workflow from exact review target ids. The extension owns review accounting and queues after this point.",
+    promptSnippet: "Start extension-owned semantic review state after screening",
+    parameters: reviewStartParameters,
+    outputSchema: reviewStartOutputSchema,
+    executionMode: "sequential",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async execute(_toolCallId, params) {
+      const request = params as { preset: string; scope: string; reviewTargetIds: string[] };
+      const preset = getPreset(request.preset);
+      const result = reviewWorkflows.start({
+        preset: preset.id,
+        scope: request.scope,
+        reviewTargetIds: request.reviewTargetIds,
+        targetItems: preset.evidence.targetItems,
+      });
+      const text = result.status === "ok"
+        ? `screen_review_start: workflow=${result.workflowId}, preset=${preset.id}, targets=${result.progress?.reviewTarget ?? 0}`
+        : `screen_review_start: failed with ${result.issues.length} issue(s)`;
+      return {
+        content: [{ type: "text", text }],
+        details: { workflowId: result.workflowId ?? null, preset: preset.id },
+        structuredContent: result as unknown as JsonValue,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "screen_review_next",
+    label: "Semantic review next",
+    description:
+      "Return the exact current semantic-review evidence packet from extension-owned workflow state. Repeated calls before commit return the same pending packet. Omit workflowId to resume the latest workflow in this Pi session.",
+    promptSnippet: "Fetch the next extension-owned semantic review packet",
+    parameters: reviewNextParameters,
+    outputSchema: reviewNextOutputSchema,
+    executionMode: "sequential",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async execute(_toolCallId, params, signal) {
+      const request = params as { workflowId?: string };
+      const result = await reviewWorkflows.next(request.workflowId, async (packetRequest) =>
+        buildEvidencePacket({ ...packetRequest, signal }),
+      );
+      const text = JSON.stringify(result);
+      return {
+        content: [{ type: "text", text }],
+        details: { workflowId: result.workflowId ?? null, packetId: result.packetId ?? null },
+        structuredContent: result as unknown as JsonValue,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "screen_review_commit",
+    label: "Semantic review commit",
+    description:
+      "Atomically validate dispositions for the current workflow packet and advance extension-owned review state. Handles reviewed/evidence-seen accounting, expanded evidence, blocked quarantine, findings, and terminal status.",
+    promptSnippet: "Commit semantic dispositions atomically to extension-owned review state",
+    parameters: reviewCommitParameters,
+    outputSchema: reviewCommitOutputSchema,
+    executionMode: "sequential",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+    async execute(_toolCallId, params) {
+      const request = params as {
+        workflowId?: string;
+        packetId: string;
+        dispositions: ReviewDecisionInput[];
+      };
+      const result = reviewWorkflows.commit(request);
+      const text = JSON.stringify(result);
+      return {
+        content: [{ type: "text", text }],
+        details: { workflowId: result.workflowId ?? null, packetId: result.packetId ?? null },
+        structuredContent: result as unknown as JsonValue,
       };
     },
   });
@@ -791,5 +1180,13 @@ export {
   discoverOutputSchema,
   evidenceParameters,
   evidenceOutputSchema,
+  reviewApplyParameters,
+  reviewApplyOutputSchema,
+  reviewStartParameters,
+  reviewStartOutputSchema,
+  reviewNextParameters,
+  reviewNextOutputSchema,
+  reviewCommitParameters,
+  reviewCommitOutputSchema,
   resolveClassifierModel,
 };

@@ -1,58 +1,61 @@
 # Architecture
 
-`pi-semantic-screen` separates four concerns so a new use case does not require a new orchestration prompt.
+`pi-semantic-screen` separates classifier screening, semantic policy, deterministic source integration, and review-state ownership.
 
 ```text
 prompt / command
       |
-      v
-preset registry ------------------------------+
-(semantic policy)                             |
-      | adapter id                            |
-      v                                       |
-adapter registry                              |
-(deterministic source handling)               |
-      |                                       |
-      +--> screen_discover(count/candidates)  |
-      +--> screen_evidence(packet)             |
-                                              |
-Code Mode generic workflow                    |
-      |                                       |
-      +--> screen_preflight                    |
-      +--> screen_batch <----------------------+ primary/refinement policy
-      +--> compact review state
-      +--> semantic disposition of evidence
+      +--> preset registry ------------------------------+
+      |     semantic policy                              |
+      |                                                  |
+      +--> adapter registry                              |
+      |     deterministic discovery/evidence             |
+      |                                                  |
+      +--> screen_preflight                              |
+      +--> screen_batch <--------------------------------+ primary/refinement
+      |
+      +--> screen_review_start(reviewTargetIds)
+              |
+              v
+        extension-owned ReviewWorkflowManager
+              |
+              +--> screen_review_next
+              |      -> adapter evidence
+              |      -> token bound
+              |      -> reviewContract
+              |      -> exact pending packet
+              |
+              +--> screen_review_commit
+                     -> exact coverage validation
+                     -> reviewed/evidenceSeen
+                     -> expanded queue
+                     -> blocked quarantine
+                     -> findings
+                     -> terminal status
 ```
 
 ## Generic classifier engine
 
-`screen_batch` knows only:
+`screen_batch` knows only stable candidate IDs, candidate text, boolean criteria, threshold/model options, and the deterministic call guard. It does not know files, Python, exceptions, callers, or review workflow state.
 
-- stable candidate IDs;
-- candidate text;
-- boolean question/criteria;
-- threshold/provider/model/guard options.
-
-It does **not** know files, Python, exception handlers, callers, or project structure. Keep it that way.
-
-`screen_preflight` implements the same deterministic call-count guard without receiving candidate text and without making classifier calls.
+`screen_preflight` applies the same projected-call guard without candidate text and with zero classifier calls.
 
 ## Presets
 
-A preset is semantic policy:
+A preset defines semantic policy:
 
-- public ID and description;
+- public ID/description;
 - adapter ID;
-- primary classifier question/criteria/threshold;
+- primary classifier stage;
 - optional opt-in refinement stage;
-- semantic-review instructions, confirmation rule, and explicit rejection rule;
+- semantic review instructions / confirm / reject policy;
 - evidence packet defaults.
 
-See `src/presets/types.ts` and `docs/presets.md`.
+A preset does not implement traversal, parsing, evidence extraction, or review-state bookkeeping.
 
 ## Adapters
 
-An adapter is deterministic source integration. It must implement:
+An adapter implements deterministic source integration:
 
 ```ts
 interface ScreeningAdapter {
@@ -63,79 +66,101 @@ interface ScreeningAdapter {
 }
 ```
 
-`discover()` has a cheap `count` mode and a rich `candidates` mode. `evidence()` receives stable candidate IDs and returns the exact IDs actually represented in a bounded evidence packet.
+`discover()` exposes cheap `count` and rich `candidates` modes. `evidence()` receives stable IDs and returns exact represented IDs plus bounded evidence. Adapters fail closed on source/identity errors.
 
-Adapters may use bundled scripts or native TypeScript, but their behavior must be testable independently of the parent model. The parent model should never have to regenerate the adapter's parser.
+## Extension-owned review workflow
 
-## Built-in Python exceptions adapter
+0.5.x moves the review state machine out of prompts/Code Mode and into `ReviewWorkflowManager`.
 
-`python-exceptions` uses one bundled Python script (`src/adapters/python-exceptions.py`) invoked directly by the extension. It does not use PowerShell and does not ask Code Mode to generate Python.
+### Start
 
-Discovery:
+After canonical screening/refinement, `screen_review_start` receives exact `reviewTargetIds` and creates an opaque process-local `workflowId`.
 
-- walks Python files under the requested scope;
-- parses each file once per adapter invocation;
-- produces one candidate per `ast.ExceptHandler`;
-- includes scope, caught type, try operation, handler body, and immediate downstream context;
-- fails closed when a source file cannot be decoded or parsed.
+### Next
 
-Evidence:
+`screen_review_next` selects work deterministically:
 
-- resolves requested stable `path:start-end` IDs;
-- reads/parses source deterministically;
-- emits bounded source evidence plus enclosing context, deep continuation/function-return context, and lightweight call-site evidence;
-- supports `detail:"expanded"` for unresolved cases without changing candidate identity;
-- enforces exact `packetIds`, source-count and character caps;
-- fails closed on stale/unresolvable IDs rather than pretending review coverage.
+1. unresolved standard items needing expanded evidence;
+2. otherwise stable-order unreviewed/unblocked standard targets.
 
-## Review state
+The manager invokes the preset adapter, applies the token budget, validates exact packet/item identity, assigns an opaque `packetId`, and stores the packet as pending.
 
-The exact resumable state lives in Code Mode store key:
+A second `screen_review_next` before commit returns the same pending packet. It does not rebuild evidence or advance the queue.
 
-```text
-semantic_screen_review_state
-```
+Pi sends tool `content` to the parent model while `structuredContent` is for programmatic callers. `screen_review_next` therefore serializes the bounded packet/result into model-facing `content` as well as exposing typed `structuredContent`; `screen_review_commit` does the same for progress/findings.
 
-It contains compact IDs/counts/findings only. Candidate text and raw evidence are intentionally not stored.
+### Commit
 
-Required invariants:
+`screen_review_commit` accepts only `workflowId`, `packetId`, and semantic dispositions. Dispositions may be objects or compact `[id, disposition, rationale]` tuples; the workflow normalizes both forms before validating the exact current pending packet and delegating exact coverage to the pure `applyReviewDispositions()` function.
+
+State mutation is atomic only after validation succeeds:
 
 ```text
-retained = kept + undecided + withheld + errors
-reviewedIds ⊆ evidenceSeenIds
-blockedEvidenceIds ⊆ evidenceSeenIds
-blockedEvidenceIds ∩ reviewedIds = ∅
-reviewableRemaining = reviewTargetIds - reviewedIds - blockedEvidenceIds
-semanticallyReviewed = |unique reviewedIds|
-unreviewed = reviewTarget - semanticallyReviewed
-resumeAvailable=false when no actionable IDs remain
+standard INSUFFICIENT_EVIDENCE
+  -> evidenceSeen
+  -> needsExpanded queue
+  -> not reviewed
+
+expanded INSUFFICIENT_EVIDENCE
+  -> evidenceSeen
+  -> blocked quarantine
+  -> not reviewed
+
+terminal non-finding
+  -> evidenceSeen + reviewed
+
+CONFIRM
+  -> evidenceSeen + reviewed + finding
 ```
 
-A fetch stores only the exact `pendingPacketIds` returned by `screen_evidence`; those IDs are not evidence-seen yet. Every evidence packet carries an explicit `reviewContract`. The parent must assign exactly one contract disposition per pending ID. Terminal dispositions advance both `evidenceSeenIds` and `reviewedIds`; standard-detail `INSUFFICIENT_EVIDENCE` advances only `evidenceSeenIds` and forces priority refetch with `detail:"expanded"`. If expanded evidence is still insufficient, that ID is quarantined in `blockedEvidenceIds`: it stays unreviewed and cannot become a finding, while independent targets continue. Final status is `complete` when all targets are reviewed, or `review_complete_with_blocked_evidence` when the only unresolved targets are quarantined blocked IDs.
+A stale packet ID, missing disposition, duplicate disposition, or extra disposition leaves workflow state unchanged.
 
-## Why this split matters
+### Terminal status
 
-Before 0.2.0, the Python exception workflow repeatedly generated AST/evidence scripts from a large prompt. That caused inconsistent extraction, empty packets, repeated subprocess logic, and large model context.
+When all targets are either reviewed or blocked:
 
-From 0.2.0 onward:
+```text
+complete
+```
 
-- prompts orchestrate;
-- presets define meaning;
-- adapters extract deterministically;
-- `screen_batch` classifies generically.
+or:
 
-Most future use cases should require a small preset. Only genuinely new source semantics require a new adapter.
+```text
+review_complete_with_blocked_evidence
+```
 
-## Single-call-per-stage orchestration
+Blocked IDs remain honestly unreviewed.
 
-Structured adapter tools must not be invoked twice merely because the parent first previews a result and later needs the same structured data in Code Mode. Call the tool from Code Mode on first use and reuse that result. In particular, avoid `direct screen_preset -> Code Mode screen_preset` and `direct screen_evidence -> Code Mode screen_evidence`. Each evidence packet is built once, its exact IDs are stored as pending in the same execution, and its evidence is then reviewed by the parent. Distinct packets may be pipelined in one user turn.
+## State lifetime
 
-## Evidence transport budget
+Review workflow state is process-local. It survives model context compaction and ordinary user turns because it is not stored in model context. It is reset on Pi `session_start` / process restart.
 
-`screen_evidence` applies the adapter's item/source/character bounds first, then the extension applies the preset `maxTokens` budget to the exact structured payload that Code Mode will receive. The built-in preset defaults to 7200 estimated tokens, leaving headroom below Code Mode output truncation. Trimming happens only between complete evidence items; the returned `packetIds`, `sourceCount`, and `chars` are recomputed after token trimming.
+This is deliberate for 0.5.x: no raw evidence or mutable accounting snapshot is serialized by the model. A future persistent workflow store could be added behind the same opaque workflow API without returning ownership to prompts.
 
-Transport integrity is fail-closed: truncation warnings, `estimatedTokens > tokenBudget`, or visible item IDs that do not exactly match `pendingPacketIds` cannot advance review accounting.
+## Evidence transport
+
+The adapter applies source/item/character safety caps, then the extension applies the preset `maxTokens` budget to the exact structured evidence payload including `reviewContract` overhead.
+
+Trimming occurs only between complete items. The manager validates that returned `packetIds` exactly match evidence item IDs and that all returned IDs were requested before making the packet pending.
+
+A smaller returned subset than the internal requested set is normal. Requested size is not review coverage.
 
 ## Semantic review contract
 
-`screen_evidence` includes `instructions`, `confirmWhen`, `rejectWhen`, a fixed disposition vocabulary, and the action for insufficient evidence. Only `CONFIRM` creates a finding. UI/display-only effects, optional enrichment, cleanup/retry/telemetry, expected normalization, explicit failure states, and paths with no demonstrated core outward effect have explicit non-finding dispositions. This keeps semantic review aligned with the preset instead of relying on unconstrained parent-model intuition.
+Each packet carries `instructions`, `confirmWhen`, `rejectWhen`, and the fixed disposition vocabulary. The parent model performs only this semantic step. It never chooses queue order or edits review accounting.
+
+`NO_OUTWARD_EFFECT` requires affirmative evidence. Missing context is `INSUFFICIENT_EVIDENCE`.
+
+For authoritative source data, silently dropping malformed records or replacing failed authoritative persisted-state loading with a normal empty/default domain object is not `EXPECTED_NORMALIZATION` unless that behavior is explicitly permitted and surfaced.
+
+## Low-level compatibility APIs
+
+`screen_evidence` and `screen_review_apply` remain public low-level tools for tests/custom integrations. Canonical preset workflows use the stateful review trio:
+
+```text
+screen_review_start
+screen_review_next
+screen_review_commit
+```
+
+This keeps state ownership in one layer while preserving reusable primitives.
