@@ -24,7 +24,8 @@ These checks cover:
 - extension tool registration;
 - preset/adapter registries;
 - Python exception count/candidate/evidence behavior;
-- exact evidence packet IDs, item/source/character caps, and token-budget trimming;
+- exact evidence packet IDs, item/source/character caps, token-budget trimming, and review-contract overhead;
+- explicit semantic dispositions, expanded-evidence escalation, and per-ID blocked-evidence quarantine;
 - fail-closed Python syntax failures;
 - fail-closed transport-truncation accounting contracts;
 - prompt/skill architecture boundaries.

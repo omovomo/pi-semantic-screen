@@ -29,7 +29,8 @@ evidence({
   ids,
   maxItems,
   maxSources,
-  maxChars
+  maxChars,
+  detail: "standard" | "expanded"
 })
 ```
 
@@ -38,7 +39,8 @@ Return:
 - `packetIds`: exact IDs actually represented by evidence;
 - `items`: evidence records in the same order;
 - `sourceCount` and `chars`;
-- `status:"error"` on stale/unresolvable targets or source failures.
+- `status:"error"` on stale/unresolvable targets or source failures;
+- expanded detail may add bounded function-tail/caller context for IDs that were semantically unresolved at standard detail.
 
 The caller must never infer packet membership from the requested number of IDs. After adapter extraction, the extension may further trim complete items to the preset `maxTokens` transport budget and recomputes exact packet metadata.
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.1 - 2026-10-02
+
+- Quarantine expanded `INSUFFICIENT_EVIDENCE` per ID in `blockedEvidenceIds` instead of globally stopping semantic review.
+- Continue reviewing independent targets after blocked evidence while keeping blocked IDs evidence-seen but explicitly unreviewed.
+- Add exact queue semantics: expanded-needed first, then stable standard targets excluding reviewed and blocked IDs.
+- Add `review_complete_with_blocked_evidence` terminal status when no actionable targets remain but blocked IDs still exist.
+- Make `resumeAvailable` represent actionable resumable work rather than requiring every review target to be terminally reviewed.
+- Persist only compact blocked IDs/reasons; blocked IDs cannot become findings without an explicit fresh/manual review.
+
+## 0.3.0 - 2026-10-02
+
+- Add an explicit `reviewContract` to every `screen_evidence` payload so semantic review receives the preset's instructions, confirmation rule, rejection rule, and fixed disposition vocabulary.
+- Require exactly one `{id, disposition, rationale}` per pending evidence item before commit; only `CONFIRM` creates a finding.
+- Add terminal non-finding dispositions for UI-only effects, optional enrichment, cleanup/retry/telemetry, expected normalization, explicit failure, and no demonstrated outward effect.
+- Make `INSUFFICIENT_EVIDENCE` non-terminal: it does not advance `reviewedIds` and is refetched first with `detail:"expanded"`; unresolved expanded evidence stops fail-closed with `blockedOnEvidence`.
+- Add `detail:"standard" | "expanded"` to `screen_evidence`; expanded Python exception evidence includes bounded function-tail context and additional caller hints.
+- Improve Python exception continuation evidence by walking out of exhausted nested blocks and including containing-function return statements.
+- Include the review contract itself in transport token-budget estimation.
+- Enforce an explicit at-most-three evidence-packet continuation budget.
+
 ## 0.2.2 - 2026-10-02
 
 - Bound `screen_evidence` by estimated serialized token cost (`maxTokens`, default 7200) before Code Mode transport; item/source/character limits remain secondary safety caps.

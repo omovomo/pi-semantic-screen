@@ -115,19 +115,60 @@ def caught_text(handler: ast.ExceptHandler) -> str:
         return type(handler.type).__name__
 
 
-def downstream_nodes(try_node: ast.AST, stmt_lists: dict[int, tuple[list[ast.stmt], int]]):
-    entry = stmt_lists.get(id(try_node))
-    if not entry:
+def downstream_nodes(try_node: ast.AST, parents: dict[int, ast.AST], stmt_lists: dict[int, tuple[list[ast.stmt], int]]):
+    """Find the next executable statements, walking out of exhausted nested blocks.
+
+    This is important for handlers at the end of an if/for/with body: the caller-visible
+    continuation may live after the enclosing statement rather than immediately after try.
+    Never walk past the containing function into module/class siblings.
+    """
+    current: ast.AST | None = try_node
+    while current is not None:
+        entry = stmt_lists.get(id(current))
+        if entry:
+            statements, index = entry
+            following = statements[index + 1 : index + 3]
+            if following:
+                return following
+        current = parents.get(id(current))
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            break
+    return []
+
+
+def function_returns(function_node: ast.AST | None) -> list[ast.Return]:
+    if not isinstance(function_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return []
-    statements, index = entry
-    return statements[index + 1 : index + 3]
+    found: list[ast.Return] = []
+
+    class ReturnVisitor(ast.NodeVisitor):
+        def visit_Return(self, node: ast.Return):
+            found.append(node)
+
+        def visit_FunctionDef(self, node: ast.FunctionDef):
+            if node is function_node:
+                self.generic_visit(node)
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+            if node is function_node:
+                self.generic_visit(node)
+
+        def visit_ClassDef(self, node: ast.ClassDef):
+            return
+
+        def visit_Lambda(self, node: ast.Lambda):
+            return
+
+    ReturnVisitor().visit(function_node)
+    found.sort(key=lambda node: getattr(node, "lineno", 0))
+    return found
 
 
 def candidate_record(path: Path, lines: list[str], handler: ast.ExceptHandler, parents, stmt_lists) -> dict[str, Any]:
     try_node = nearest(handler, parents, (ast.Try, getattr(ast, "TryStar", ast.Try)))
     operation = nodes_source(lines, list(getattr(try_node, "body", [])), 850) if try_node else "<unknown>"
     handler_text = nodes_source(lines, list(handler.body), 800)
-    downstream = nodes_source(lines, downstream_nodes(try_node, stmt_lists) if try_node else [], 420)
+    downstream = nodes_source(lines, downstream_nodes(try_node, parents, stmt_lists) if try_node else [], 420)
     scope = ".".join(scope_names(handler, parents)) or "<module>"
     start = getattr(handler, "lineno", 0)
     end = getattr(handler, "end_lineno", start)
@@ -194,7 +235,7 @@ def line_window(lines: list[str], lineno: int, radius: int = 1, limit: int = 320
     return clip(source_for_lines(lines, start, end), limit)
 
 
-def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_chars: int) -> dict[str, Any]:
+def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_chars: int, detail: str = "standard") -> dict[str, Any]:
     wanted = []
     invalid: list[dict[str, str]] = []
     for value in ids:
@@ -327,7 +368,9 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
         scope_name = ".".join(scope_names(handler, parents)) or "<module>"
         operation = nodes_source(lines, list(getattr(try_node, "body", [])), 420) if try_node else "<unknown>"
         handler_text = nodes_source(lines, list(handler.body), 420)
-        downstream = nodes_source(lines, downstream_nodes(try_node, stmt_lists) if try_node else [], 240)
+        downstream = nodes_source(lines, downstream_nodes(try_node, parents, stmt_lists) if try_node else [], 320)
+        returns = function_returns(function_node)
+        return_evidence = nodes_source(lines, returns[-2:], 360) if returns else "<none>"
         # Avoid repeating most of the same function body already present in operation/handler/downstream.
         # A compact signature/context line plus caller hints carries the structural context needed for review.
         context = line_window(lines, getattr(scope_node, "lineno", start), 0, 260) if scope_node else line_window(lines, start, 1, 260)
@@ -337,8 +380,14 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
                 if caller_path == path_name and getattr(function_node, "lineno", 0) <= caller_line <= getattr(function_node, "end_lineno", 0):
                     continue
                 callers.append(f"{caller_path}:{caller_line}: {clip(snippet, 170)}")
-                if len(callers) >= 2:
+                if len(callers) >= (4 if detail == "expanded" else 2):
                     break
+        expanded_tail = ""
+        if detail == "expanded" and isinstance(function_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            tail_start = getattr(try_node, "end_lineno", end) + 1 if try_node else end + 1
+            tail_end = getattr(function_node, "end_lineno", tail_start)
+            tail_text = source_for_lines(lines, tail_start, tail_end)
+            expanded_tail = clip(tail_text, 1100) if tail_text.strip() else "<none>"
         evidence_text = (
             f"id: {value}\n"
             f"scope: {scope_name}\n"
@@ -346,10 +395,12 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
             f"operation: {operation}\n"
             f"handler: {handler_text}\n"
             f"downstream: {downstream}\n"
+            f"function_returns: {return_evidence}\n"
             f"context: {context}\n"
             f"callers: {' | '.join(callers) if callers else '<none found>'}"
+            + (f"\nexpanded_function_tail: {expanded_tail}" if detail == "expanded" else "")
         )
-        evidence_text = clip(evidence_text, 1800)
+        evidence_text = clip(evidence_text, 3000 if detail == "expanded" else 2100)
         projected = chars + len(evidence_text)
         if packet and projected > max_chars:
             break
@@ -387,6 +438,7 @@ def main() -> None:
             max(1, min(int(request.get("maxItems") or 80), 500)),
             max(1, min(int(request.get("maxSources") or 10), 100)),
             max(1000, min(int(request.get("maxChars") or 40000), 250000)),
+            "expanded" if request.get("detail") == "expanded" else "standard",
         )
     else:
         result = {"status": "error", "scope": scope, "total": 0, "issues": [{"message": f"unknown action: {action}"}]}

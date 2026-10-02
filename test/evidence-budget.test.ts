@@ -43,3 +43,15 @@ test("token bound fails closed when one evidence item cannot fit", () => {
   assert.deepEqual(bounded.items, []);
   assert.match(bounded.issues?.[0]?.message ?? "", /exceeds token budget/i);
 });
+
+
+test("transport budget includes review-contract overhead", () => {
+  const source = resultWithEvidence([250, 250, 250]);
+  const withoutContract = boundEvidenceByTokens(source, 1000, (text) => text.length, { preset: "p" });
+  const withContract = boundEvidenceByTokens(source, 1000, (text) => text.length, {
+    preset: "p",
+    reviewContract: { rejectWhen: "r".repeat(300), dispositions: ["CONFIRM", "INSUFFICIENT_EVIDENCE"] },
+  });
+  assert.ok(withContract.items.length < withoutContract.items.length);
+  assert.ok(withContract.estimatedTokens <= withContract.tokenBudget);
+});

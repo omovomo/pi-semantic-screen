@@ -44,3 +44,14 @@ test("screen_evidence exposes a transport token budget and exact post-trim accou
   assert.match(source, /boundEvidenceByTokens/);
   assert.match(source, /preset\.evidence\.maxTokens/);
 });
+
+
+test("screen_evidence carries the semantic review contract and supports expanded detail", () => {
+  assert.match(source, /reviewContractSchema/);
+  assert.match(source, /buildReviewContract/);
+  assert.match(source, /rejectWhen: Type\.String\(\)/);
+  assert.match(source, /Type\.Literal\("INSUFFICIENT_EVIDENCE"\)/);
+  assert.match(source, /detail: Type\.Optional/);
+  assert.match(source, /Type\.Literal\("expanded"\)/);
+  assert.match(source, /\{ preset: preset\.id, detail, reviewContract \}/);
+});

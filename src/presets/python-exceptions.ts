@@ -29,9 +29,11 @@ export const pythonExceptionsPreset: ScreeningPreset = {
   },
   review: {
     instructions:
-      "Inspect the emitted source evidence, enclosing function context, downstream behavior, and available call sites. Mechanical syntax alone is not semantic confirmation.",
+      "Inspect the emitted source evidence, enclosing function context, downstream behavior, function returns, and available call sites. Mechanical syntax alone is not semantic confirmation. Absence of shown downstream evidence is not proof of no outward effect; use INSUFFICIENT_EVIDENCE when the packet cannot establish either confirmation or a terminal rejection.",
     confirmWhen:
-      "Confirm only when the evidence establishes both hidden/changed failure semantics and a caller-visible/default/incomplete outward effect.",
+      "Confirm only when the evidence establishes both hidden/changed failure semantics and a material caller-visible/default/incomplete core outward effect.",
+    rejectWhen:
+      "Reject UI/display-only stale state, logging/telemetry, cleanup, retry/reconnect, optional enrichment, expected normalization, explicit failure/unavailable states, and paths where the evidence affirmatively establishes no core outward effect. UI-only effects are not findings unless they feed back into core data/control state. Missing context is INSUFFICIENT_EVIDENCE, not NO_OUTWARD_EFFECT.",
   },
   evidence: {
     targetItems: 60,

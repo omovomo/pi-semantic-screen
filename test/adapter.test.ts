@@ -33,10 +33,11 @@ function fixture(): { root: string; cleanup: () => void } {
     join(root, "pkg", "b.py"),
     [
       "def other():",
-      "    try:",
-      "        run()",
-      "    except Exception:",
-      "        pass",
+      "    if enabled():",
+      "        try:",
+      "            run()",
+      "        except Exception:",
+      "            pass",
       "    return 1",
       "",
     ].join("\n"),
@@ -120,6 +121,44 @@ test("python-exceptions evidence fails closed on stale ids", async () => {
     assert.equal(packet.status, "error");
     assert.equal(packet.packetIds.length, 0);
     assert.match(packet.issues?.[0]?.message ?? "", /stale|unresolved/i);
+  } finally {
+    cleanup();
+  }
+});
+
+
+test("python-exceptions evidence walks out of nested blocks and expanded detail adds function context", async () => {
+  const { root, cleanup } = fixture();
+  try {
+    const scope = join(root, "pkg");
+    const rich = await pythonExceptionsAdapter.discover({ scope, mode: "candidates" });
+    assert.equal(rich.status, "ok");
+    const id = rich.items!.find((item) => item.text.includes("scope: other"))!.id;
+
+    const standard = await pythonExceptionsAdapter.evidence({
+      scope,
+      ids: [id],
+      maxItems: 10,
+      maxSources: 2,
+      maxChars: 40_000,
+      detail: "standard",
+    });
+    assert.equal(standard.status, "ok");
+    assert.match(standard.items[0].evidence, /downstream: return 1/);
+    assert.match(standard.items[0].evidence, /function_returns: return 1/);
+    assert.doesNotMatch(standard.items[0].evidence, /expanded_function_tail:/);
+
+    const expanded = await pythonExceptionsAdapter.evidence({
+      scope,
+      ids: [id],
+      maxItems: 10,
+      maxSources: 2,
+      maxChars: 40_000,
+      detail: "expanded",
+    });
+    assert.equal(expanded.status, "ok");
+    assert.match(expanded.items[0].evidence, /expanded_function_tail:/);
+    assert.match(expanded.items[0].evidence, /return 1/);
   } finally {
     cleanup();
   }

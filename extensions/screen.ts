@@ -18,6 +18,7 @@ import { redactSecrets } from "../src/redaction.ts";
 import { getAdapter } from "../src/adapters/registry.ts";
 import { getPreset, listPresets } from "../src/presets/registry.ts";
 import { boundEvidenceByTokens } from "../src/evidence-budget.ts";
+import { buildReviewContract } from "../src/review-contract.ts";
 
 const DEFAULT_PROVIDER_MODEL: readonly [string, string] = ["openrouter", "typesafe/jev-1.13"];
 const PROVIDER_ORDER = ["openrouter", "typesafe", "opencode", "vercel-ai-gateway", "cloudflare-workers-ai"];
@@ -322,7 +323,7 @@ const presetOutputSchema = Type.Object(
           primary: stagePresetSchema,
           refinement: Type.Optional(stagePresetSchema),
           review: Type.Object(
-            { instructions: Type.String(), confirmWhen: Type.String() },
+            { instructions: Type.String(), confirmWhen: Type.String(), rejectWhen: Type.String() },
             { additionalProperties: false },
           ),
           evidence: Type.Object(
@@ -393,6 +394,37 @@ const evidenceParameters = Type.Object(
     maxSources: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
     maxChars: Type.Optional(Type.Integer({ minimum: 1000, maximum: 250000 })),
     maxTokens: Type.Optional(Type.Integer({ minimum: 1000, maximum: 20000 })),
+    detail: Type.Optional(Type.Union([Type.Literal("standard"), Type.Literal("expanded")])),
+  },
+  { additionalProperties: false },
+);
+
+const reviewDispositionSchema = Type.Object(
+  {
+    id: Type.Union([
+      Type.Literal("CONFIRM"),
+      Type.Literal("EXPLICIT_FAILURE"),
+      Type.Literal("UI_ONLY"),
+      Type.Literal("OPTIONAL_ENRICHMENT"),
+      Type.Literal("CLEANUP_RETRY_TELEMETRY"),
+      Type.Literal("EXPECTED_NORMALIZATION"),
+      Type.Literal("NO_OUTWARD_EFFECT"),
+      Type.Literal("INSUFFICIENT_EVIDENCE"),
+    ]),
+    terminal: Type.Boolean(),
+    finding: Type.Boolean(),
+    description: Type.String(),
+  },
+  { additionalProperties: false },
+);
+
+const reviewContractSchema = Type.Object(
+  {
+    instructions: Type.String(),
+    confirmWhen: Type.String(),
+    rejectWhen: Type.String(),
+    dispositions: Type.Array(reviewDispositionSchema),
+    insufficientEvidenceAction: Type.String(),
   },
   { additionalProperties: false },
 );
@@ -403,6 +435,8 @@ const evidenceOutputSchema = Type.Object(
     adapter: Type.String(),
     preset: Type.String(),
     scope: Type.String(),
+    detail: Type.Union([Type.Literal("standard"), Type.Literal("expanded")]),
+    reviewContract: reviewContractSchema,
     requested: Type.Integer({ minimum: 0 }),
     packetIds: Type.Array(Type.String()),
     sourceCount: Type.Integer({ minimum: 0 }),
@@ -626,6 +660,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         maxSources?: number;
         maxChars?: number;
         maxTokens?: number;
+        detail?: "standard" | "expanded";
       };
       const preset = getPreset(request.preset);
       const adapter = getAdapter(preset.adapter);
@@ -635,18 +670,21 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         maxItems: request.maxItems ?? preset.evidence.maxItems,
         maxSources: request.maxSources ?? preset.evidence.maxSources,
         maxChars: request.maxChars ?? preset.evidence.maxChars,
+        detail: request.detail ?? "standard",
         signal,
       });
+      const detail = request.detail ?? "standard";
+      const reviewContract = buildReviewContract(preset);
       const bounded = boundEvidenceByTokens(
         result,
         request.maxTokens ?? preset.evidence.maxTokens,
         estimateClassifierTokens,
-        { preset: preset.id },
+        { preset: preset.id, detail, reviewContract },
       );
-      const structuredResult = { ...bounded, preset: preset.id };
+      const structuredResult = { ...bounded, preset: preset.id, detail, reviewContract };
       const text =
         bounded.status === "ok"
-          ? `screen_evidence: preset=${preset.id}, packet=${bounded.packetIds.length}/${bounded.requested}, sources=${bounded.sourceCount}, chars=${bounded.chars}, tokens~${bounded.estimatedTokens}/${bounded.tokenBudget}`
+          ? `screen_evidence: preset=${preset.id}, detail=${detail}, packet=${bounded.packetIds.length}/${bounded.requested}, sources=${bounded.sourceCount}, chars=${bounded.chars}, tokens~${bounded.estimatedTokens}/${bounded.tokenBudget}`
           : `screen_evidence: preset=${preset.id} failed with ${bounded.issues?.length ?? 0} issue(s)`;
       return {
         content: [{ type: "text", text }],

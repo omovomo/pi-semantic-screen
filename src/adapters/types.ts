@@ -29,6 +29,7 @@ export interface AdapterEvidenceRequest {
   maxItems: number;
   maxSources: number;
   maxChars: number;
+  detail?: "standard" | "expanded";
   signal?: AbortSignal;
 }
 

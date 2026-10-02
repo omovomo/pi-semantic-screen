@@ -16,6 +16,7 @@ export interface ScreeningPreset {
   review: {
     instructions: string;
     confirmWhen: string;
+    rejectWhen: string;
   };
   evidence: {
     targetItems: number;

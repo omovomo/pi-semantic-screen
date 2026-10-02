@@ -16,7 +16,7 @@ A preset defines:
   adapter,
   primary: { question, criteria, threshold },
   refinement?: { question, criteria, threshold },
-  review: { instructions, confirmWhen },
+  review: { instructions, confirmWhen, rejectWhen },
   evidence: { targetItems, maxItems, maxSources, maxChars, maxTokens }
 }
 ```
@@ -57,3 +57,7 @@ is only an ergonomic alias for:
 The alias contains no AST parser, evidence builder, batching implementation, or use-case state machine.
 
 `maxTokens` is the primary Code Mode transport budget. `maxItems`, `maxSources`, and `maxChars` remain deterministic adapter safety caps and should not be used as a proxy for transport size.
+
+## Review contract
+
+At runtime the extension combines the preset review policy with the generic disposition vocabulary and includes that `reviewContract` in every `screen_evidence` payload. Reviewers must classify every pending ID with exactly one disposition. `INSUFFICIENT_EVIDENCE` from standard detail is deliberately non-terminal and triggers a priority `detail:"expanded"` refetch; it must not be converted into a guessed finding or rejection. If expanded evidence is still insufficient, only that ID is quarantined in `blockedEvidenceIds`; unrelated review targets continue and the final workflow reports `review_complete_with_blocked_evidence` rather than pretending full semantic coverage.

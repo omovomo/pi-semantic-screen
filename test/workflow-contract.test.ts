@@ -42,7 +42,9 @@ test("review state preserves exact evidence accounting", () => {
   assert.match(skill, /semantic_screen_review_state/i);
   assert.match(skill, /`reviewedIds ⊆ evidenceSeenIds`/i);
   assert.match(skill, /exact previous `pendingPacketIds`/i);
-  assert.match(skill, /resumeAvailable:false.*exactly equals the review-target set/is);
+  assert.match(skill, /`blockedEvidenceIds`.*disjoint from `reviewedIds`/is);
+  assert.match(skill, /`reviewableRemaining = reviewTargetIds - reviewedIds - blockedEvidenceIds`/i);
+  assert.match(skill, /resumeAvailable:true.*actionable targets/is);
   assert.match(skill, /Never infer reviewed coverage from requested packet size, offsets, slices, packet count, or a successful fetch alone/i);
 });
 
@@ -50,7 +52,7 @@ test("review evidence comes only from screen_evidence", () => {
   assert.match(skill, /Fetch evidence only with `screen_evidence`/i);
   assert.match(skill, /do not regenerate source extractors in Code Mode/i);
   assert.match(skill, /set `pendingPacketIds` to the exact returned IDs/i);
-  assert.match(skill, /roughly 100-120 semantic dispositions or three evidence packets/i);
+  assert.match(skill, /roughly 100-120 semantic dispositions and \*\*at most three\*\* evidence packets/i);
   assert.match(skill, /truncated.*do not disposition or commit/is);
 });
 
@@ -115,4 +117,32 @@ test("continuation reuses stored preset and pipelines distinct packets", () => {
   assert.match(continuePrompt, /single-call-per-packet, not single-packet-per-turn/i);
   assert.match(continuePrompt, /up to three different packets/i);
   assert.match(skill, /make zero `screen_preset`, classifier, preflight, or rediscovery calls/i);
+});
+
+
+test("semantic review uses explicit contract dispositions and fail-closed evidence escalation", () => {
+  assert.match(skill, /Each successful `screen_evidence` packet includes a `reviewContract`/i);
+  assert.match(skill, /UI\/display-only effect is `UI_ONLY` rather than a finding/i);
+  assert.match(skill, /exactly one `\{id, disposition, rationale\}` for every `pendingPacketId`/i);
+  assert.match(skill, /only for `CONFIRM`/i);
+  assert.match(skill, /`INSUFFICIENT_EVIDENCE`.*does not advance `reviewedIds`/is);
+  assert.match(skill, /detail:"expanded"/i);
+  assert.match(skill, /blockedEvidenceIds/i);
+  assert.match(skill, /fail closed \*\*for that ID only\*\*/i);
+  assert.match(skill, /Do not globally stop review because one ID is blocked/i);
+  assert.match(skill, /review_complete_with_blocked_evidence/i);
+  assert.match(genericPrompt, /explicit `reviewContract`/i);
+  assert.match(continuePrompt, /needsExpandedEvidenceIds/i);
+});
+
+
+test("expanded insufficient evidence is quarantined without blocking independent targets", () => {
+  assert.match(continuePrompt, /remaining `reviewTargetIds - reviewedIds - blockedEvidenceIds`/i);
+  assert.match(continuePrompt, /Never automatically refetch `blockedEvidenceIds`/i);
+  assert.match(continuePrompt, /Expanded-detail `INSUFFICIENT_EVIDENCE` is fail-closed \*\*for that ID only\*\*/i);
+  assert.match(continuePrompt, /Never stop the entire workflow merely because blocked IDs exist/i);
+  assert.match(continuePrompt, /blockedEvidenceIds ∩ reviewedIds = ∅/i);
+  assert.match(continuePrompt, /status:review_complete_with_blocked_evidence/i);
+  assert.match(genericPrompt, /expanded-detail `INSUFFICIENT_EVIDENCE` moves to `blockedEvidenceIds`/i);
+  assert.match(genericPrompt, /When all targets are either reviewed or blocked/i);
 });

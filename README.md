@@ -2,13 +2,13 @@
 
 Adapter-driven semantic screening for Pi Code Mode: cheaply classify many candidates, then perform bounded resumable deep review over deterministic evidence.
 
-Version **0.2.2** keeps the generic engine + adapters + presets architecture and makes semantic-review transport token-bounded and fail-closed.
+Version **0.3.1** keeps the contract-driven review from 0.3.0 and changes expanded-evidence failure from a global stop into a per-ID fail-closed quarantine, so independent review targets continue.
 
-## Why 0.2.2
+## Why 0.3.x
 
 Early releases proved the classifier path but also exposed a scaling problem: a rich `/screen-exceptions` prompt repeatedly asked the parent model to generate Python AST/evidence scripts. That made extraction inconsistent and expensive.
 
-0.2.2 separates concerns and hardens evidence transport:
+0.3.x separates concerns, preserves hardened evidence transport, and carries explicit semantic-review policy with every evidence packet:
 
 ```text
 screen_batch / screen_preflight   generic classifier engine
@@ -46,7 +46,7 @@ pi -e ./pi-semantic-screen
 GitHub release tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.2.2
+pi install git:github.com/<owner>/pi-semantic-screen@v0.3.1
 ```
 
 Pi packages are designed to distribute extensions, skills, and prompt templates together, including installation from git/npm/local sources. Host Pi packages are declared as peer dependencies rather than bundled runtime dependencies.
@@ -161,7 +161,7 @@ await tools.screen_evidence({
 });
 ```
 
-The returned `packetIds` are authoritative. `screen_evidence` token-bounds the exact structured payload before Code Mode transport, returns `tokenBudget` and `estimatedTokens`, and trims only at whole-item boundaries. Review accounting must never assume that all requested IDs fit the packet.
+The returned `packetIds` are authoritative. `screen_evidence` token-bounds the exact structured payload before Code Mode transport, returns `tokenBudget` and `estimatedTokens`, trims only at whole-item boundaries, and includes an explicit `reviewContract`. Standard evidence can be refetched with `detail:"expanded"` when the reviewer returns `INSUFFICIENT_EVIDENCE`. Review accounting must never assume that all requested IDs fit the packet.
 
 ## Built-in `python-exceptions` adapter
 
@@ -179,7 +179,7 @@ Each candidate includes:
 - handler body;
 - immediate downstream context.
 
-Review evidence additionally includes compact enclosing function context/signature and lightweight call-site evidence without repeating most of the function body. The adapter fails closed on unreadable/unparseable Python sources instead of silently dropping them.
+Review evidence additionally includes compact enclosing function context/signature, function-return/continuation context, and lightweight call-site evidence without repeating most of the function body. Expanded detail adds a bounded tail of the containing function for unresolved cases. The adapter fails closed on unreadable/unparseable Python sources instead of silently dropping them.
 
 The adapter is bundled code, not model-generated Python, and is invoked directly without PowerShell.
 
@@ -196,13 +196,19 @@ Important invariants:
 ```text
 retained = kept + undecided + withheld + errors
 pendingPacketIds are not evidenceSeen until complete parent disposition
+terminal dispositions advance reviewedIds and evidenceSeenIds
+INSUFFICIENT_EVIDENCE from standard detail advances evidenceSeenIds only and triggers detail=expanded
+INSUFFICIENT_EVIDENCE after expanded detail moves to blockedEvidenceIds and remains unreviewed
 reviewedIds ⊆ evidenceSeenIds
+blockedEvidenceIds ⊆ evidenceSeenIds
+blockedEvidenceIds ∩ reviewedIds = ∅
+reviewableRemaining = reviewTargetIds - reviewedIds - blockedEvidenceIds
 semanticallyReviewed = |unique reviewedIds|
 unreviewed = reviewTarget - semanticallyReviewed
-resumeAvailable=false only when reviewedIds == reviewTargetIds
+resumeAvailable=false when no actionable IDs remain; final status distinguishes complete vs review_complete_with_blocked_evidence
 ```
 
-Candidate text and raw evidence are not stored in the resumable state. A truncated or item-ID-mismatched packet cannot advance `evidenceSeenIds` or `reviewedIds`; it is retried with a lower token budget.
+Candidate text and raw evidence are not stored in the resumable state. A truncated or item-ID-mismatched packet cannot advance `evidenceSeenIds` or `reviewedIds`; it is retried with a lower token budget. Expanded evidence that is still insufficient is quarantined per-ID in `blockedEvidenceIds`; it cannot become reviewed or a finding, but it also cannot stall unrelated review targets.
 
 ## Classifier selection
 

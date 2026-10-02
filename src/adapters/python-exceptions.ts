@@ -12,6 +12,7 @@ interface PythonAdapterRequest {
   maxItems?: number;
   maxSources?: number;
   maxChars?: number;
+  detail?: "standard" | "expanded";
 }
 
 const scriptUrl = new URL("./python-exceptions.py", import.meta.url);
@@ -42,6 +43,7 @@ export const pythonExceptionsAdapter: ScreeningAdapter = {
         maxItems: request.maxItems,
         maxSources: request.maxSources,
         maxChars: request.maxChars,
+        detail: request.detail,
       },
       request.signal,
     );

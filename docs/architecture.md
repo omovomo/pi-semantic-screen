@@ -45,7 +45,7 @@ A preset is semantic policy:
 - adapter ID;
 - primary classifier question/criteria/threshold;
 - optional opt-in refinement stage;
-- semantic-review instructions and confirmation rule;
+- semantic-review instructions, confirmation rule, and explicit rejection rule;
 - evidence packet defaults.
 
 See `src/presets/types.ts` and `docs/presets.md`.
@@ -83,7 +83,8 @@ Evidence:
 
 - resolves requested stable `path:start-end` IDs;
 - reads/parses source deterministically;
-- emits bounded source evidence plus enclosing context and lightweight call-site evidence;
+- emits bounded source evidence plus enclosing context, deep continuation/function-return context, and lightweight call-site evidence;
+- supports `detail:"expanded"` for unresolved cases without changing candidate identity;
 - enforces exact `packetIds`, source-count and character caps;
 - fails closed on stale/unresolvable IDs rather than pretending review coverage.
 
@@ -102,12 +103,15 @@ Required invariants:
 ```text
 retained = kept + undecided + withheld + errors
 reviewedIds ⊆ evidenceSeenIds
+blockedEvidenceIds ⊆ evidenceSeenIds
+blockedEvidenceIds ∩ reviewedIds = ∅
+reviewableRemaining = reviewTargetIds - reviewedIds - blockedEvidenceIds
 semanticallyReviewed = |unique reviewedIds|
 unreviewed = reviewTarget - semanticallyReviewed
-resumeAvailable=false only when reviewedIds == reviewTargetIds
+resumeAvailable=false when no actionable IDs remain
 ```
 
-A fetch stores only the exact `pendingPacketIds` returned by `screen_evidence`; those IDs are not evidence-seen yet. A commit can include only those pending IDs after the parent actually receives the complete packet and dispositions every item, at which point the same IDs are unioned into both `evidenceSeenIds` and `reviewedIds`.
+A fetch stores only the exact `pendingPacketIds` returned by `screen_evidence`; those IDs are not evidence-seen yet. Every evidence packet carries an explicit `reviewContract`. The parent must assign exactly one contract disposition per pending ID. Terminal dispositions advance both `evidenceSeenIds` and `reviewedIds`; standard-detail `INSUFFICIENT_EVIDENCE` advances only `evidenceSeenIds` and forces priority refetch with `detail:"expanded"`. If expanded evidence is still insufficient, that ID is quarantined in `blockedEvidenceIds`: it stays unreviewed and cannot become a finding, while independent targets continue. Final status is `complete` when all targets are reviewed, or `review_complete_with_blocked_evidence` when the only unresolved targets are quarantined blocked IDs.
 
 ## Why this split matters
 
@@ -131,3 +135,7 @@ Structured adapter tools must not be invoked twice merely because the parent fir
 `screen_evidence` applies the adapter's item/source/character bounds first, then the extension applies the preset `maxTokens` budget to the exact structured payload that Code Mode will receive. The built-in preset defaults to 7200 estimated tokens, leaving headroom below Code Mode output truncation. Trimming happens only between complete evidence items; the returned `packetIds`, `sourceCount`, and `chars` are recomputed after token trimming.
 
 Transport integrity is fail-closed: truncation warnings, `estimatedTokens > tokenBudget`, or visible item IDs that do not exactly match `pendingPacketIds` cannot advance review accounting.
+
+## Semantic review contract
+
+`screen_evidence` includes `instructions`, `confirmWhen`, `rejectWhen`, a fixed disposition vocabulary, and the action for insufficient evidence. Only `CONFIRM` creates a finding. UI/display-only effects, optional enrichment, cleanup/retry/telemetry, expected normalization, explicit failure states, and paths with no demonstrated core outward effect have explicit non-finding dispositions. This keeps semantic review aligned with the preset instead of relying on unconstrained parent-model intuition.
