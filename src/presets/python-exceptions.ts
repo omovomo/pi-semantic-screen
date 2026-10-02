@@ -37,6 +37,7 @@ export const pythonExceptionsPreset: ScreeningPreset = {
     targetItems: 60,
     maxItems: 80,
     maxSources: 10,
-    maxChars: 40_000,
+    maxChars: 120_000,
+    maxTokens: 7_200,
   },
 };

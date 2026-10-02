@@ -17,6 +17,7 @@ import { screeningPreflight } from "../src/preflight.ts";
 import { redactSecrets } from "../src/redaction.ts";
 import { getAdapter } from "../src/adapters/registry.ts";
 import { getPreset, listPresets } from "../src/presets/registry.ts";
+import { boundEvidenceByTokens } from "../src/evidence-budget.ts";
 
 const DEFAULT_PROVIDER_MODEL: readonly [string, string] = ["openrouter", "typesafe/jev-1.13"];
 const PROVIDER_ORDER = ["openrouter", "typesafe", "opencode", "vercel-ai-gateway", "cloudflare-workers-ai"];
@@ -330,6 +331,7 @@ const presetOutputSchema = Type.Object(
               maxItems: Type.Integer({ minimum: 1 }),
               maxSources: Type.Integer({ minimum: 1 }),
               maxChars: Type.Integer({ minimum: 1 }),
+              maxTokens: Type.Integer({ minimum: 1 }),
             },
             { additionalProperties: false },
           ),
@@ -390,6 +392,7 @@ const evidenceParameters = Type.Object(
     maxItems: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
     maxSources: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
     maxChars: Type.Optional(Type.Integer({ minimum: 1000, maximum: 250000 })),
+    maxTokens: Type.Optional(Type.Integer({ minimum: 1000, maximum: 20000 })),
   },
   { additionalProperties: false },
 );
@@ -404,6 +407,8 @@ const evidenceOutputSchema = Type.Object(
     packetIds: Type.Array(Type.String()),
     sourceCount: Type.Integer({ minimum: 0 }),
     chars: Type.Integer({ minimum: 0 }),
+    tokenBudget: Type.Integer({ minimum: 1 }),
+    estimatedTokens: Type.Integer({ minimum: 0 }),
     items: Type.Array(
       Type.Object(
         { id: Type.String(), source: Type.String(), evidence: Type.String() },
@@ -620,6 +625,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         maxItems?: number;
         maxSources?: number;
         maxChars?: number;
+        maxTokens?: number;
       };
       const preset = getPreset(request.preset);
       const adapter = getAdapter(preset.adapter);
@@ -631,11 +637,17 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         maxChars: request.maxChars ?? preset.evidence.maxChars,
         signal,
       });
-      const structuredResult = { ...result, preset: preset.id };
+      const bounded = boundEvidenceByTokens(
+        result,
+        request.maxTokens ?? preset.evidence.maxTokens,
+        estimateClassifierTokens,
+        { preset: preset.id },
+      );
+      const structuredResult = { ...bounded, preset: preset.id };
       const text =
-        result.status === "ok"
-          ? `screen_evidence: preset=${preset.id}, packet=${result.packetIds.length}/${result.requested}, sources=${result.sourceCount}, chars=${result.chars}`
-          : `screen_evidence: preset=${preset.id} failed with ${result.issues?.length ?? 0} issue(s)`;
+        bounded.status === "ok"
+          ? `screen_evidence: preset=${preset.id}, packet=${bounded.packetIds.length}/${bounded.requested}, sources=${bounded.sourceCount}, chars=${bounded.chars}, tokens~${bounded.estimatedTokens}/${bounded.tokenBudget}`
+          : `screen_evidence: preset=${preset.id} failed with ${bounded.issues?.length ?? 0} issue(s)`;
       return {
         content: [{ type: "text", text }],
         details: { preset: preset.id, adapter: adapter.id },

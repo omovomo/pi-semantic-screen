@@ -107,7 +107,7 @@ unreviewed = reviewTarget - semanticallyReviewed
 resumeAvailable=false only when reviewedIds == reviewTargetIds
 ```
 
-A commit can include only IDs from the exact previous `pendingPacketIds` returned by `screen_evidence`.
+A fetch stores only the exact `pendingPacketIds` returned by `screen_evidence`; those IDs are not evidence-seen yet. A commit can include only those pending IDs after the parent actually receives the complete packet and dispositions every item, at which point the same IDs are unioned into both `evidenceSeenIds` and `reviewedIds`.
 
 ## Why this split matters
 
@@ -124,4 +124,10 @@ Most future use cases should require a small preset. Only genuinely new source s
 
 ## Single-call-per-stage orchestration
 
-Structured adapter tools must not be invoked twice merely because the parent first previews a result and later needs the same structured data in Code Mode. Call the tool from Code Mode on first use and reuse that result. In particular, avoid `direct screen_preset -> Code Mode screen_preset` and `direct screen_evidence -> Code Mode screen_evidence`. Each evidence packet is built once, its exact IDs are stored in the same execution, and its evidence is then reviewed by the parent.
+Structured adapter tools must not be invoked twice merely because the parent first previews a result and later needs the same structured data in Code Mode. Call the tool from Code Mode on first use and reuse that result. In particular, avoid `direct screen_preset -> Code Mode screen_preset` and `direct screen_evidence -> Code Mode screen_evidence`. Each evidence packet is built once, its exact IDs are stored as pending in the same execution, and its evidence is then reviewed by the parent. Distinct packets may be pipelined in one user turn.
+
+## Evidence transport budget
+
+`screen_evidence` applies the adapter's item/source/character bounds first, then the extension applies the preset `maxTokens` budget to the exact structured payload that Code Mode will receive. The built-in preset defaults to 7200 estimated tokens, leaving headroom below Code Mode output truncation. Trimming happens only between complete evidence items; the returned `packetIds`, `sourceCount`, and `chars` are recomputed after token trimming.
+
+Transport integrity is fail-closed: truncation warnings, `estimatedTokens > tokenBudget`, or visible item IDs that do not exactly match `pendingPacketIds` cannot advance review accounting.

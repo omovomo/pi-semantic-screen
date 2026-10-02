@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.2 - 2026-10-02
+
+- Bound `screen_evidence` by estimated serialized token cost (`maxTokens`, default 7200) before Code Mode transport; item/source/character limits remain secondary safety caps.
+- Trim evidence only at whole-item boundaries and recompute exact `packetIds`, `sourceCount`, and `chars` after token bounding.
+- Fail closed when a single evidence item cannot fit the token budget.
+- Make fetched IDs pending only; `evidenceSeenIds`/`reviewedIds` advance only after the parent receives the complete packet and semantically dispositions it.
+- Treat transport truncation or packet/item-ID mismatch as non-reviewable and retry with a lower token budget.
+- Pipeline up to three distinct evidence packets per `/screen-continue` turn while keeping each packet single-fetch.
+- Remove `screen_preset` from continuation; preset config is stored once and reused.
+- Reduce redundant Python exception review evidence by replacing repeated enclosing-function bodies with compact function context/signature.
+- Add `package-lock.json` and switch GitHub Actions to `npm ci`.
+
+
 ## 0.2.1 - 2026-10-02
 
 ### Changed

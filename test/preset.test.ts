@@ -11,7 +11,8 @@ test("python-exceptions preset resolves through the adapter registry", () => {
   assert.equal(preset.primary.threshold, 0.70);
   assert.equal(preset.refinement?.threshold, 0.75);
   assert.equal(preset.evidence.maxSources, 10);
-  assert.equal(preset.evidence.maxChars, 40_000);
+  assert.equal(preset.evidence.maxChars, 120_000);
+  assert.equal(preset.evidence.maxTokens, 7_200);
 });
 
 test("preset and adapter registries list stable public ids", () => {

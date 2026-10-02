@@ -325,16 +325,18 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
         scope_node = nearest(handler, parents, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
         function_node = function_for_handler.get(key)
         scope_name = ".".join(scope_names(handler, parents)) or "<module>"
-        operation = nodes_source(lines, list(getattr(try_node, "body", [])), 620) if try_node else "<unknown>"
-        handler_text = nodes_source(lines, list(handler.body), 620)
-        downstream = nodes_source(lines, downstream_nodes(try_node, stmt_lists) if try_node else [], 300)
-        enclosing = node_source(lines, scope_node, 900) if scope_node else line_window(lines, start, 4, 900)
+        operation = nodes_source(lines, list(getattr(try_node, "body", [])), 420) if try_node else "<unknown>"
+        handler_text = nodes_source(lines, list(handler.body), 420)
+        downstream = nodes_source(lines, downstream_nodes(try_node, stmt_lists) if try_node else [], 240)
+        # Avoid repeating most of the same function body already present in operation/handler/downstream.
+        # A compact signature/context line plus caller hints carries the structural context needed for review.
+        context = line_window(lines, getattr(scope_node, "lineno", start), 0, 260) if scope_node else line_window(lines, start, 1, 260)
         callers: list[str] = []
         if isinstance(function_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for caller_path, caller_line, snippet in call_index.get(function_node.name, []):
                 if caller_path == path_name and getattr(function_node, "lineno", 0) <= caller_line <= getattr(function_node, "end_lineno", 0):
                     continue
-                callers.append(f"{caller_path}:{caller_line}: {clip(snippet, 220)}")
+                callers.append(f"{caller_path}:{caller_line}: {clip(snippet, 170)}")
                 if len(callers) >= 2:
                     break
         evidence_text = (
@@ -344,10 +346,10 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
             f"operation: {operation}\n"
             f"handler: {handler_text}\n"
             f"downstream: {downstream}\n"
-            f"enclosing: {enclosing}\n"
+            f"context: {context}\n"
             f"callers: {' | '.join(callers) if callers else '<none found>'}"
         )
-        evidence_text = clip(evidence_text, 2600)
+        evidence_text = clip(evidence_text, 1800)
         projected = chars + len(evidence_text)
         if packet and projected > max_chars:
             break

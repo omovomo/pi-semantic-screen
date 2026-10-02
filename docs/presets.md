@@ -17,7 +17,7 @@ A preset defines:
   primary: { question, criteria, threshold },
   refinement?: { question, criteria, threshold },
   review: { instructions, confirmWhen },
-  evidence: { targetItems, maxItems, maxSources, maxChars }
+  evidence: { targetItems, maxItems, maxSources, maxChars, maxTokens }
 }
 ```
 
@@ -55,3 +55,5 @@ is only an ergonomic alias for:
 ```
 
 The alias contains no AST parser, evidence builder, batching implementation, or use-case state machine.
+
+`maxTokens` is the primary Code Mode transport budget. `maxItems`, `maxSources`, and `maxChars` remain deterministic adapter safety caps and should not be used as a proxy for transport size.

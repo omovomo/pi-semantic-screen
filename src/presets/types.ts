@@ -22,5 +22,6 @@ export interface ScreeningPreset {
     maxItems: number;
     maxSources: number;
     maxChars: number;
+    maxTokens: number;
   };
 }

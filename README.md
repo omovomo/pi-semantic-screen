@@ -2,13 +2,13 @@
 
 Adapter-driven semantic screening for Pi Code Mode: cheaply classify many candidates, then perform bounded resumable deep review over deterministic evidence.
 
-Version **0.2.1** replaces use-case-specific orchestration with a generic engine + adapters + presets.
+Version **0.2.2** keeps the generic engine + adapters + presets architecture and makes semantic-review transport token-bounded and fail-closed.
 
-## Why 0.2.1
+## Why 0.2.2
 
 Early releases proved the classifier path but also exposed a scaling problem: a rich `/screen-exceptions` prompt repeatedly asked the parent model to generate Python AST/evidence scripts. That made extraction inconsistent and expensive.
 
-0.2.1 separates concerns:
+0.2.2 separates concerns and hardens evidence transport:
 
 ```text
 screen_batch / screen_preflight   generic classifier engine
@@ -46,7 +46,7 @@ pi -e ./pi-semantic-screen
 GitHub release tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.2.1
+pi install git:github.com/<owner>/pi-semantic-screen@v0.2.2
 ```
 
 Pi packages are designed to distribute extensions, skills, and prompt templates together, including installation from git/npm/local sources. Host Pi packages are declared as peer dependencies rather than bundled runtime dependencies.
@@ -156,11 +156,12 @@ await tools.screen_evidence({
   ids: remainingIds,
   maxItems: 80,
   maxSources: 10,
-  maxChars: 40000
+  maxChars: 120000,
+  maxTokens: 7200
 });
 ```
 
-The returned `packetIds` are authoritative. Review accounting must never assume that all requested IDs fit the packet.
+The returned `packetIds` are authoritative. `screen_evidence` token-bounds the exact structured payload before Code Mode transport, returns `tokenBudget` and `estimatedTokens`, and trims only at whole-item boundaries. Review accounting must never assume that all requested IDs fit the packet.
 
 ## Built-in `python-exceptions` adapter
 
@@ -178,7 +179,7 @@ Each candidate includes:
 - handler body;
 - immediate downstream context.
 
-Review evidence additionally includes bounded enclosing source and lightweight call-site evidence. The adapter fails closed on unreadable/unparseable Python sources instead of silently dropping them.
+Review evidence additionally includes compact enclosing function context/signature and lightweight call-site evidence without repeating most of the function body. The adapter fails closed on unreadable/unparseable Python sources instead of silently dropping them.
 
 The adapter is bundled code, not model-generated Python, and is invoked directly without PowerShell.
 
@@ -194,13 +195,14 @@ Important invariants:
 
 ```text
 retained = kept + undecided + withheld + errors
+pendingPacketIds are not evidenceSeen until complete parent disposition
 reviewedIds ⊆ evidenceSeenIds
 semanticallyReviewed = |unique reviewedIds|
 unreviewed = reviewTarget - semanticallyReviewed
 resumeAvailable=false only when reviewedIds == reviewTargetIds
 ```
 
-Candidate text and raw evidence are not stored in the resumable state.
+Candidate text and raw evidence are not stored in the resumable state. A truncated or item-ID-mismatched packet cannot advance `evidenceSeenIds` or `reviewedIds`; it is retried with a lower token budget.
 
 ## Classifier selection
 
@@ -280,7 +282,7 @@ A new use case should **not** require copying the generic workflow into another 
 ## Development
 
 ```sh
-npm install --ignore-scripts
+npm ci --ignore-scripts
 npm run check
 npm run pack:dry
 ```

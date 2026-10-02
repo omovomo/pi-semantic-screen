@@ -43,14 +43,15 @@ test("review state preserves exact evidence accounting", () => {
   assert.match(skill, /`reviewedIds ⊆ evidenceSeenIds`/i);
   assert.match(skill, /exact previous `pendingPacketIds`/i);
   assert.match(skill, /resumeAvailable:false.*exactly equals the review-target set/is);
-  assert.match(skill, /Never infer reviewed coverage from requested packet size, offsets, or slices/i);
+  assert.match(skill, /Never infer reviewed coverage from requested packet size, offsets, slices, packet count, or a successful fetch alone/i);
 });
 
 test("review evidence comes only from screen_evidence", () => {
   assert.match(skill, /Fetch evidence only with `screen_evidence`/i);
   assert.match(skill, /do not regenerate source extractors in Code Mode/i);
-  assert.match(skill, /exact `packetIds`/i);
-  assert.match(skill, /about 120 semantic dispositions or two large evidence packets/i);
+  assert.match(skill, /set `pendingPacketIds` to the exact returned IDs/i);
+  assert.match(skill, /roughly 100-120 semantic dispositions or three evidence packets/i);
+  assert.match(skill, /truncated.*do not disposition or commit/is);
 });
 
 test("screen-use is the generic preset entry point", () => {
@@ -70,10 +71,10 @@ test("screen-exceptions is a short alias rather than a workflow implementation",
 
 test("screen-continue resumes only through the stored preset adapter", () => {
   assert.match(continuePrompt, /load `semantic_screen_review_state`/i);
-  assert.match(continuePrompt, /Do not call `screen_preflight`, `screen_discover`, or `screen_batch`/i);
+  assert.match(continuePrompt, /Do not call `screen_preset`, `screen_preflight`, `screen_discover`, or `screen_batch`/i);
   assert.match(continuePrompt, /continue only through `screen_evidence`/i);
   assert.match(continuePrompt, /zero classifier calls and zero rediscovery passes/i);
-  assert.match(continuePrompt, /exact `packetIds`/i);
+  assert.match(continuePrompt, /exact `packetIds` as `pendingPacketIds`/i);
 });
 
 test("ad-hoc screen clearly distinguishes weaker guarantees", () => {
@@ -86,7 +87,8 @@ test("ad-hoc screen clearly distinguishes weaker guarantees", () => {
 test("preset orchestration forbids direct preview plus Code Mode duplicate calls", () => {
   assert.match(skill, /single-call-per-stage/i);
   assert.match(skill, /never make a direct preview call and then repeat the same `screen_preset`, `screen_discover`, `screen_preflight`, `screen_batch`, or `screen_evidence` call inside Code Mode/i);
-  assert.match(skill, /one Code Mode execution, call `screen_preset\(\{id\}\)`, then `screen_discover\(\{preset:id, scope, mode:"count"\}\)`, then `screen_preflight\(\{count\}\)`/i);
+  assert.match(skill, /call `screen_preset\(\{id\}\)` exactly once for the workflow/i);
+  assert.match(skill, /Then call `screen_discover\(\{preset:id, scope, mode:"count"\}\)`, then `screen_preflight\(\{count\}\)`/i);
   assert.match(skill, /call `screen_discover\(\{preset:id, scope, mode:"candidates"\}\)` once and immediately call `screen_batch` once/i);
   assert.match(genericPrompt, /one Code Mode call per structured stage/i);
   assert.match(genericPrompt, /never call a tool directly for a preview and then repeat the same call inside Code Mode/i);
@@ -94,8 +96,23 @@ test("preset orchestration forbids direct preview plus Code Mode duplicate calls
 
 test("evidence orchestration fetches each packet once and stores exact ids in the same execution", () => {
   assert.match(skill, /Fetch each evidence packet exactly once from Code Mode/i);
-  assert.match(skill, /In the same Code Mode execution, set `pendingPacketIds` to those exact IDs/i);
-  assert.match(genericPrompt, /Fetch each packet exactly once inside Code Mode/i);
-  assert.match(genericPrompt, /Never do direct `screen_evidence` \+ Code Mode `screen_evidence` for the same packet/i);
-  assert.match(continuePrompt, /Do not make direct preview calls to `screen_preset` or `screen_evidence` and then repeat them in Code Mode/i);
+  assert.match(skill, /In the same fetch execution, set `pendingPacketIds` to the exact returned IDs/i);
+  assert.match(genericPrompt, /fetch each distinct packet exactly once inside Code Mode/i);
+  assert.match(genericPrompt, /single-call-per-packet, not single-packet-per-turn/i);
+  assert.match(continuePrompt, /Do not preview it directly first/i);
+});
+
+test("transport truncation is fail-closed and pending ids are not evidence-seen before disposition", () => {
+  assert.match(skill, /pending IDs are not evidence-seen yet/i);
+  assert.match(skill, /transport-truncated packet can never advance `reviewedIds` or `evidenceSeenIds`/i);
+  assert.match(skill, /visible evidence item IDs do not exactly equal `pendingPacketIds`/i);
+  assert.match(genericPrompt, /do not add pending IDs to `evidenceSeenIds` until the parent has actually received the complete packet/i);
+  assert.match(continuePrompt, /do .*not.* add them to `evidenceSeenIds` yet/i);
+});
+
+test("continuation reuses stored preset and pipelines distinct packets", () => {
+  assert.match(continuePrompt, /Do not call `screen_preset`/i);
+  assert.match(continuePrompt, /single-call-per-packet, not single-packet-per-turn/i);
+  assert.match(continuePrompt, /up to three different packets/i);
+  assert.match(skill, /make zero `screen_preset`, classifier, preflight, or rediscovery calls/i);
 });

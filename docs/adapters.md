@@ -40,7 +40,7 @@ Return:
 - `sourceCount` and `chars`;
 - `status:"error"` on stale/unresolvable targets or source failures.
 
-The caller must never infer packet membership from the requested number of IDs.
+The caller must never infer packet membership from the requested number of IDs. After adapter extraction, the extension may further trim complete items to the preset `maxTokens` transport budget and recomputes exact packet metadata.
 
 ## Adding an adapter
 
@@ -88,4 +88,4 @@ The adapter forces UTF-8 I/O and uses JSON over stdin/stdout. No shell is requir
 - No classifier or LLM calls inside adapters.
 - No hidden fuzzy matching that can silently change candidate identity.
 - Fail closed on missing source, parser failures, or stale IDs.
-- Keep rich source payloads bounded.
+- Keep rich source payloads bounded and avoid duplicating source context inside one evidence item.

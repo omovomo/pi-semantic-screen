@@ -2,6 +2,14 @@
 
 ## Required offline checks
 
+From a fresh clone first install the locked development dependencies:
+
+```sh
+npm ci
+```
+
+Then run:
+
 ```sh
 npm test
 npm run typecheck:offline
@@ -16,8 +24,9 @@ These checks cover:
 - extension tool registration;
 - preset/adapter registries;
 - Python exception count/candidate/evidence behavior;
-- exact evidence packet IDs and caps;
+- exact evidence packet IDs, item/source/character caps, and token-budget trimming;
 - fail-closed Python syntax failures;
+- fail-closed transport-truncation accounting contracts;
 - prompt/skill architecture boundaries.
 
 ## Host checks

@@ -36,3 +36,11 @@ test("extension defers context compaction to the host unless explicitly configur
   assert.match(source, /Drop superseded raw evidence\/source excerpts/);
   assert.match(source, /if \(completed\) semanticScreenWorkflowActive = false/);
 });
+
+test("screen_evidence exposes a transport token budget and exact post-trim accounting", () => {
+  assert.match(source, /maxTokens: Type\.Optional/);
+  assert.match(source, /tokenBudget: Type\.Integer/);
+  assert.match(source, /estimatedTokens: Type\.Integer/);
+  assert.match(source, /boundEvidenceByTokens/);
+  assert.match(source, /preset\.evidence\.maxTokens/);
+});
