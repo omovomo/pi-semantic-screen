@@ -6,18 +6,22 @@
 prompt / command
       |
       +--> preset registry ------------------------------+
-      |     semantic policy                              |
+      |     primary/refinement/review semantic policy    |
       |                                                  |
       +--> adapter registry                              |
       |     deterministic discovery/evidence             |
       |                                                  |
-      +--> screen_preflight                              |
-      +--> screen_batch <--------------------------------+ primary/refinement
-      |
-      +--> screen_review_start(reviewTargetIds)
-              |
-              v
-        extension-owned ReviewWorkflowManager
+      +--> count discovery + screen_preflight            |
+      |                                                  |
+      +--> screen_primary_start -------------------------+
+      |     exact preset primary contract                |
+      |     extension-owned retained IDs                 |
+      |     optional defer for explicit refinement       |
+      |                                                  |
+      +--> screen_refinement_start (optional) -----------+
+      |     exact preset refinement contract             |
+      |                                                  |
+      +--> extension-owned ReviewWorkflowManager
               |
               +--> screen_review_next
               |      -> adapter evidence
@@ -32,13 +36,17 @@ prompt / command
                      -> blocked quarantine
                      -> findings
                      -> terminal status
+
+screen_batch / screen_review_start remain low-level compatibility APIs.
 ```
 
 ## Generic classifier engine
 
-`screen_batch` knows only stable candidate IDs, candidate text, boolean criteria, threshold/model options, and the deterministic call guard. It does not know files, Python, exceptions, callers, or review workflow state.
+`screen_batch` remains the generic low-level classifier primitive: stable candidate IDs/text, boolean criteria, threshold/model options, and the deterministic call guard. It does not know files, Python, exceptions, callers, presets, or review workflow state.
 
-`screen_preflight` applies the same projected-call guard without candidate text and with zero classifier calls.
+Canonical preset workflows do **not** ask the model to call `screen_batch`. `screen_primary_start` / `screen_refinement_start` build the `ScreeningInput` inside the extension from the registered preset, so the model cannot paraphrase or replace the preset question, criteria, or threshold.
+
+`screen_preflight` applies the projected-call guard from count-only discovery with zero classifier calls and no rich candidate text.
 
 ## Presets
 
@@ -52,6 +60,31 @@ A preset defines semantic policy:
 - evidence packet defaults.
 
 A preset does not implement traversal, parsing, evidence extraction, or review-state bookkeeping.
+
+
+## Extension-owned preset screening workflow
+
+0.6.x moves preset screening semantics and retained-candidate ownership out of prompts/Code Mode, mirroring the 0.5.x review-state move.
+
+### Primary
+
+`screen_primary_start({preset, scope, confirm, ...})` performs candidate-mode discovery internally and constructs the primary classifier input exclusively from `preset.primary`. There are no model-visible `question`, `criteria`, `threshold`, candidate-array, or `reviewTargetIds` parameters.
+
+On a successful primary result, the extension computes exactly:
+
+```text
+retained = kept + undecided + withheld + errors
+```
+
+For the normal path it immediately starts `ReviewWorkflowManager` with those IDs. The first successful `preset+scope` initialization is canonical for the active Pi session; repeated calls reuse the same `primaryRunId`/`workflowId` without rediscovery or classifier calls unless `rescreen:true` is explicit. Failed or approval-required primary runs do not become canonical state.
+
+### Optional refinement
+
+Explicit refinement uses `screen_primary_start(..., deferReview:true)`. The manager stores only the retained primary candidates in process-local state and returns an opaque `primaryRunId`. `screen_refinement_start({primaryRunId, confirm})` runs the exact `preset.refinement` contract over those retained candidates, applies its own call guard, computes refined retained IDs, and starts review. The model never reconstructs refinement candidates or semantic criteria.
+
+### State lifetime
+
+Preset-screening state is process-local and reset on Pi `session_start` together with review state and the screening result cache. Context compaction does not erase it. A process restart requires fresh preflight/screening.
 
 ## Value-directed expanded evidence
 
@@ -74,11 +107,11 @@ interface ScreeningAdapter {
 
 ## Extension-owned review workflow
 
-0.5.x moves the review state machine out of prompts/Code Mode and into `ReviewWorkflowManager`.
+0.5.x moved the review state machine out of prompts/Code Mode and into `ReviewWorkflowManager`; 0.6.x leaves those invariants intact while making review initialization internal to preset screening.
 
 ### Start
 
-After canonical screening/refinement, `screen_review_start` receives exact `reviewTargetIds` and creates an opaque process-local `workflowId`.
+Canonical preset screening/refinement starts review internally with exact extension-owned retained IDs and returns the opaque `workflowId`. `screen_review_start` remains available for low-level/custom integrations that already own exact `reviewTargetIds`.
 
 ### Next
 
@@ -139,7 +172,7 @@ Blocked IDs remain honestly unreviewed.
 
 Review workflow state is process-local. It survives model context compaction and ordinary user turns because it is not stored in model context. It is reset on Pi `session_start` / process restart.
 
-This is deliberate for 0.5.x: no raw evidence or mutable accounting snapshot is serialized by the model. A future persistent workflow store could be added behind the same opaque workflow API without returning ownership to prompts.
+This is deliberate: no raw evidence, retained-candidate list, or mutable accounting snapshot is serialized by the model in canonical preset workflows. A future persistent workflow store could be added behind the same opaque APIs without returning ownership to prompts.
 
 ## Evidence transport
 
@@ -159,12 +192,13 @@ For authoritative source data, silently dropping malformed records or replacing 
 
 ## Low-level compatibility APIs
 
-`screen_evidence` and `screen_review_apply` remain public low-level tools for tests/custom integrations. Canonical preset workflows use the stateful review trio:
+`screen_batch`, `screen_review_start`, `screen_evidence`, and `screen_review_apply` remain public low-level tools for tests/custom integrations. Canonical preset workflows use:
 
 ```text
-screen_review_start
+screen_primary_start
+[screen_refinement_start]
 screen_review_next
 screen_review_commit
 ```
 
-This keeps state ownership in one layer while preserving reusable primitives.
+This keeps semantic-contract, retained-ID, and review-state ownership in the extension while preserving reusable primitives.

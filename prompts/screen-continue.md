@@ -3,7 +3,7 @@ description: Continue the most recent semantic review without rediscovery or res
 argument-hint: ""
 ---
 
-Resume the latest extension-owned semantic review. Do not call `screen_preset`, `screen_preflight`, `screen_discover`, `screen_batch`, `screen_evidence`, or `screen_review_apply`. Make zero classifier calls and zero rediscovery passes.
+Resume the latest extension-owned semantic review. Do not call `screen_preset`, `screen_preflight`, `screen_discover`, `screen_primary_start`, `screen_refinement_start`, `screen_batch`, `screen_evidence`, or `screen_review_apply`. Make zero classifier calls and zero rediscovery passes.
 
 Call `screen_review_next({})`; omitting `workflowId` selects the latest active review workflow in this Pi session. If it returns `error` with no active workflow, return only `status: no_resumable_screen_state`.
 

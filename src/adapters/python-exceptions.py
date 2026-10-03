@@ -804,12 +804,29 @@ def follow_exact_function_return(
     remaining_return_hops: int,
     constructor_already_proven: bool = False,
 ) -> str:
-    """Follow one exact returned object into its caller and resume structural policy tracing."""
+    """Follow a returned object into exact callers without guessing among fan-out sites.
+
+    One call site preserves the original exact-path behavior. Small fan-out is summarized
+    across every exact caller: each site is independently traced and the evidence reports
+    resolved/unresolved counts rather than selecting one caller. Large fan-out remains
+    unresolved to keep evidence bounded.
+    """
     if remaining_return_hops <= 0 or len(function_index.get(function_name, [])) != 1:
         return "<none>"
     sites = call_sites.get(function_name, [])
-    if len(sites) != 1:
+    if not sites:
         return "<none>"
+    if len(sites) > 1:
+        return follow_bounded_function_return_fanout(
+            function_name=function_name,
+            sites=sites,
+            function_index=function_index,
+            class_index=class_index,
+            call_sites=call_sites,
+            origin_note=origin_note,
+            remaining_return_hops=remaining_return_hops,
+            constructor_already_proven=constructor_already_proven,
+        )
     caller_path, caller_lines, call, caller_parents = sites[0]
     caller_fn = enclosing_function(call, caller_parents)
     if not isinstance(caller_fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -831,6 +848,153 @@ def follow_exact_function_return(
         origin_note=note,
         remaining_return_hops=remaining_return_hops - 1,
         constructor_already_proven=constructor_already_proven,
+    )
+
+
+def follow_bounded_function_return_fanout(
+    *,
+    function_name: str,
+    sites: list[tuple[str, list[str], ast.Call, dict[int, ast.AST]]],
+    function_index: dict[str, list[tuple[str, list[str], ast.AST, dict[int, ast.AST]]]],
+    class_index: dict[str, list[tuple[str, list[str], ast.ClassDef, dict[int, ast.AST]]]],
+    call_sites: dict[str, list[tuple[str, list[str], ast.Call, dict[int, ast.AST]]]],
+    origin_note: str,
+    remaining_return_hops: int,
+    constructor_already_proven: bool,
+    max_sites: int = 8,
+) -> str:
+    """Summarize small exact caller fan-out without choosing an arbitrary consumer."""
+    if len(sites) > max_sites:
+        return f"{origin_note}; return_fanout={len(sites)} unresolved=fanout_exceeds_{max_sites}"
+
+    flows: list[str] = []
+    unresolved = 0
+    for caller_path, caller_lines, call, caller_parents in sites:
+        caller_fn = enclosing_function(call, caller_parents)
+        if not isinstance(caller_fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            unresolved += 1
+            continue
+        binding = assignment_binding_for_call(call, caller_parents)
+        if binding:
+            note = f"returned_to={caller_fn.name}.{binding} at {caller_path}:{getattr(call, 'lineno', 0)}"
+            flow = policy_terminal_from_context(
+                lines=caller_lines,
+                path_name=caller_path,
+                function_node=caller_fn,
+                parents=caller_parents,
+                tracked={binding},
+                after_line=getattr(call, "lineno", 0),
+                function_index=function_index,
+                class_index=class_index,
+                call_sites=call_sites,
+                origin_note=note,
+                remaining_return_hops=max(0, remaining_return_hops - 1),
+                constructor_already_proven=constructor_already_proven,
+            )
+            if flow != "<none>":
+                flows.append(flow)
+            else:
+                events = first_relevant_flow_events(
+                    caller_lines, caller_fn, {binding}, after_line=getattr(call, "lineno", 0), limit=14
+                )
+                exact = exact_call_candidate(events, {binding}, function_index, caller_parents)
+                if exact is not None:
+                    consumer_call, _snippet, consumer_name, _definition, bindings = exact
+                    binding_text = ",".join(f"{arg}->{param}" for arg, param in bindings)
+                    flows.append(clip(
+                        f"consumer_shape={caller_fn.name}->{consumer_name} binding={binding_text} "
+                        f"at {caller_path}:{getattr(consumer_call, 'lineno', 0)}; terminal=<not proven>",
+                        500,
+                    ))
+                else:
+                    unresolved += 1
+            continue
+
+        inline = direct_constructor_context_for_call(call, class_index, caller_parents)
+        if inline is not None:
+            ctor_call, ctor_name, field, result_binding, returned_directly = inline
+            inline_note = (
+                f"inline_consumer={caller_fn.name}:{getattr(call, 'lineno', 0)} "
+                f"binding=return->{ctor_name}.{field}"
+            )
+            if result_binding:
+                flow = policy_terminal_from_context(
+                    lines=caller_lines,
+                    path_name=caller_path,
+                    function_node=caller_fn,
+                    parents=caller_parents,
+                    tracked={result_binding},
+                    after_line=getattr(ctor_call, "lineno", 0),
+                    function_index=function_index,
+                    class_index=class_index,
+                    call_sites=call_sites,
+                    origin_note=f"{inline_note}; constructor_result->{result_binding}",
+                    remaining_return_hops=max(0, remaining_return_hops - 1),
+                    constructor_already_proven=True,
+                )
+                if flow != "<none>":
+                    flows.append(flow)
+                else:
+                    unresolved += 1
+            elif returned_directly and remaining_return_hops > 1:
+                flow = follow_exact_function_return(
+                    function_name=caller_fn.name,
+                    function_index=function_index,
+                    class_index=class_index,
+                    call_sites=call_sites,
+                    origin_note=f"{inline_note}; returned_by={caller_fn.name}",
+                    remaining_return_hops=remaining_return_hops - 1,
+                    constructor_already_proven=True,
+                )
+                if flow != "<none>":
+                    flows.append(flow)
+                else:
+                    unresolved += 1
+            else:
+                unresolved += 1
+            continue
+
+        direct_consumer = exact_direct_consumer_context_for_call(call, function_index, caller_parents)
+        if direct_consumer is not None and constructor_already_proven:
+            outer_call, consumer_name, parameter, definition = direct_consumer
+            callee_path, callee_lines, callee_node, _callee_parents = definition
+            callee_events = first_relevant_flow_events(callee_lines, callee_node, {parameter}, limit=18)
+            guard = next(((kind, node, snippet) for kind, node, snippet in callee_events if kind in {"branch", "validation"}), None)
+            if guard is not None:
+                kind, guard_node, _guard_snippet = guard
+                outcome = branch_outcome_evidence(callee_lines, guard_node)
+                if outcome != "<no explicit bounded outcome>":
+                    result_hop = exact_return_result_hop(
+                        function_name=consumer_name,
+                        outcome_node=branch_outcome_node(guard_node),
+                        function_index=function_index,
+                        class_index=class_index,
+                        call_sites=call_sites,
+                    )
+                    suffix = f"; {result_hop}" if result_hop else ""
+                    flows.append(clip(
+                        f"direct_consumer={caller_fn.name}->{consumer_name} binding=return->{parameter} "
+                        f"at {caller_path}:{getattr(outer_call, 'lineno', 0)}; "
+                        f"{kind}@{callee_path}:{getattr(guard_node, 'lineno', 0)}="
+                        f"{node_source(callee_lines, guard_node, 360)}; outcome={outcome}{suffix}",
+                        700,
+                    ))
+                    continue
+            flows.append(
+                f"direct_consumer_shape={caller_fn.name}->{consumer_name} binding=return->{parameter} "
+                f"at {caller_path}:{getattr(outer_call, 'lineno', 0)}; terminal=<not proven>"
+            )
+            continue
+        unresolved += 1
+
+    if not flows:
+        return f"{origin_note}; return_fanout={len(sites)} resolved=0 unresolved={unresolved}"
+    # Preserve all exact consumer shapes but keep the packet bounded. The counts make partial
+    # resolution explicit so semantic review never mistakes one resolved branch for all callers.
+    joined = " || ".join(flows[:4])
+    return clip(
+        f"{origin_note}; return_fanout={len(sites)} resolved={len(flows)} unresolved={unresolved}; {joined}",
+        1500,
     )
 
 
@@ -1110,6 +1274,107 @@ def related_key(key: str, candidates: set[str]) -> bool:
     )
 
 
+def block_definitely_exits(statements: list[ast.stmt]) -> bool:
+    """Conservatively prove that a statement block cannot fall through."""
+    for statement in statements:
+        if isinstance(statement, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+            return True
+        if isinstance(statement, ast.If):
+            if statement.orelse and block_definitely_exits(statement.body) and block_definitely_exits(statement.orelse):
+                return True
+        elif isinstance(statement, ast.Match):
+            if statement.cases and all(block_definitely_exits(case.body) for case in statement.cases):
+                # A wildcard final case is required before Match can be considered exhaustive.
+                last = statement.cases[-1].pattern
+                if isinstance(last, ast.MatchAs) and last.name is None and last.pattern is None:
+                    return True
+    return False
+
+
+def following_statement(node: ast.AST, parents: dict[int, ast.AST]) -> ast.stmt | None:
+    parent = parents.get(id(node))
+    if parent is None:
+        return None
+    for attr in ("body", "orelse", "finalbody"):
+        statements = getattr(parent, attr, None)
+        if not isinstance(statements, list) or node not in statements:
+            continue
+        index = statements.index(node)
+        if index + 1 < len(statements) and isinstance(statements[index + 1], ast.stmt):
+            return statements[index + 1]
+    return None
+
+
+def handler_control_flow_evidence(
+    *,
+    lines: list[str],
+    handler: ast.ExceptHandler,
+    try_node: ast.AST | None,
+    parents: dict[int, ast.AST],
+) -> str:
+    """Summarize complete handler exit topology without reproducing the whole handler body."""
+    branches: list[ast.AST] = []
+    exits: list[tuple[int, str]] = []
+
+    class Visitor(ast.NodeVisitor):
+        def visit_If(self, node: ast.If):
+            branches.append(node)
+            self.generic_visit(node)
+
+        def visit_Match(self, node: ast.Match):
+            branches.append(node)
+            self.generic_visit(node)
+
+        def visit_Return(self, node: ast.Return):
+            exits.append((getattr(node, "lineno", 0), "return"))
+
+        def visit_Raise(self, node: ast.Raise):
+            exits.append((getattr(node, "lineno", 0), "raise"))
+
+        def visit_Continue(self, node: ast.Continue):
+            exits.append((getattr(node, "lineno", 0), "continue"))
+
+        def visit_Break(self, node: ast.Break):
+            exits.append((getattr(node, "lineno", 0), "break"))
+
+        def visit_FunctionDef(self, node: ast.FunctionDef):
+            return
+
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+            return
+
+        def visit_ClassDef(self, node: ast.ClassDef):
+            return
+
+        def visit_Lambda(self, node: ast.Lambda):
+            return
+
+    visitor = Visitor()
+    for statement in handler.body:
+        visitor.visit(statement)
+
+    branch_bits: list[str] = []
+    for node in branches[:6]:
+        if isinstance(node, ast.If):
+            try:
+                test = ast.unparse(node.test)
+            except Exception:
+                test = "<if>"
+            branch_bits.append(f"{getattr(node, 'lineno', 0)}:{clip(test, 100)}")
+        else:
+            branch_bits.append(f"{getattr(node, 'lineno', 0)}:match")
+    exits_text = ",".join(f"{kind}@{line}" for line, kind in sorted(exits)) or "<none>"
+    definitely_exits = block_definitely_exits(list(handler.body))
+    target = following_statement(try_node, parents) if try_node is not None else None
+    target_text = node_source(lines, target, 360) if target is not None else "<none>"
+    branches_text = " | ".join(branch_bits) if branch_bits else "<none>"
+    return clip(
+        f"branches={len(branches)} tests={branches_text}; explicit_exits={exits_text}; "
+        f"fallthrough={'no' if definitely_exits else 'yes'}; fallthrough_target={target_text}",
+        900,
+    )
+
+
 def handler_control_transfer(handler: ast.ExceptHandler) -> str | None:
     """Return the first direct control-transfer semantics of the handler.
 
@@ -1221,6 +1486,40 @@ def direct_constructor_context_for_call(
                     result_binding = assignment_binding_for_call(current, parents)
                     returned_directly = isinstance(stmt, ast.Return) and stmt.value is current
                     return current, name or "<constructor>", kw.arg, result_binding, returned_directly
+        current = parents.get(id(current))
+    return None
+
+
+def exact_direct_consumer_context_for_call(
+    call: ast.Call,
+    function_index: dict[str, list[tuple[str, list[str], ast.AST, dict[int, ast.AST]]]],
+    parents: dict[int, ast.AST],
+) -> tuple[ast.Call, str, str, tuple[str, list[str], ast.AST, dict[int, ast.AST]]] | None:
+    """Find an exact outer call that consumes this call result as a direct argument.
+
+    Only identity-direct positional/keyword arguments qualify; wrappers such as
+    ``evaluate(normalize(builder()))`` remain unresolved. The result is the outer call,
+    callee name, bound parameter, and its unique project-local definition.
+    """
+    current = parents.get(id(call))
+    while current is not None:
+        if isinstance(current, ast.Call):
+            name = call_name(current)
+            defs = function_index.get(name or "", []) if name else []
+            if len(defs) == 1:
+                definition = defs[0]
+                params = function_parameters(definition[2])
+                offset = positional_parameter_offset(current, definition[2], definition[3])
+                positional = params[offset:]
+                for index, arg in enumerate(current.args):
+                    if arg is call and index < len(positional):
+                        return current, name or "<call>", positional[index], definition
+                param_names = set(params)
+                for kw in current.keywords:
+                    if kw.arg is not None and kw.arg in param_names and kw.value is call:
+                        return current, name or "<call>", kw.arg, definition
+        if isinstance(current, ast.stmt):
+            break
         current = parents.get(id(current))
     return None
 
@@ -1981,6 +2280,11 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
         interprocedural = ""
         sentinel_handling = ""
         policy_terminal = ""
+        handler_flow = ""
+        if detail == "expanded":
+            handler_flow = handler_control_flow_evidence(
+                lines=lines, handler=handler, try_node=try_node, parents=parents
+            )
         if detail == "expanded" and isinstance(function_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             tail_start = getattr(try_node, "end_lineno", end) + 1 if try_node else end + 1
             tail_end = getattr(function_node, "end_lineno", tail_start)
@@ -2030,7 +2334,7 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
             f"context: {context}\n"
             f"callers: {' | '.join(callers) if callers else '<none found>'}"
             + (
-                f"\ndataflow: {dataflow}\nsemantic_hints: {semantic_hints}\nsentinel_handling: {sentinel_handling}\npolicy_terminal_flow: {policy_terminal}\ninterprocedural_flow: {interprocedural}\nexpanded_function_tail: {expanded_tail}"
+                f"\ndataflow: {dataflow}\nsemantic_hints: {semantic_hints}\nsentinel_handling: {sentinel_handling}\npolicy_terminal_flow: {policy_terminal}\ninterprocedural_flow: {interprocedural}\nhandler_control_flow: {handler_flow}\nexpanded_function_tail: {expanded_tail}"
                 if detail == "expanded" else ""
             )
         )

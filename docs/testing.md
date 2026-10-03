@@ -36,7 +36,7 @@ The suite includes:
 - standard-insufficient -> expanded priority;
 - expanded-insufficient -> blocked quarantine without global stop;
 - terminal findings/blocked/disposition accounting;
-- prompt/skill contract tests preventing model-owned review-state merging;
+- prompt/skill contract tests preventing model-owned preset-contract/retained-ID/review-state reconstruction;
 - package metadata and tool exposure.
 
 ## Full regression audit
@@ -58,23 +58,26 @@ until terminal status.
 For a full JSONL regression, verify:
 
 ```text
-screen_preset        1
-screen_discover      2 (count + candidates)
-screen_batch         1
-screen_review_start  1
-screen_review_next   one per distinct/retried pending packet
-screen_review_commit one per committed packet
-screen_evidence      0 in canonical preset review
-screen_review_apply  0 in canonical preset review
+screen_preset          1
+screen_discover        1 (count only; candidate discovery is internal)
+screen_preflight       1
+screen_primary_start   1
+screen_refinement_start 0 unless `--refine`
+screen_batch           0 in canonical preset initialization
+screen_review_start    0 in canonical preset initialization
+screen_review_next     one per distinct/retried pending packet
+screen_review_commit   one per committed packet
+screen_evidence        0 in canonical preset review
+screen_review_apply    0 in canonical preset review
 PowerShell/generated AST 0
 ```
 
 Also verify:
 
 - no duplicate evidence build when `screen_review_next` is repeated before commit;
-- no manual `reviewedIds`/blocked/expanded queue mutations in Code Mode;
+- no model-supplied preset question/criteria/threshold, retained IDs, or manual `reviewedIds`/blocked/expanded queue mutations in Code Mode;
 - no stale/empty-ID fetches;
-- exact terminal progress comes from `screen_review_commit`/`screen_review_next`;
+- primary counts/workflow ID come from `screen_primary_start` (or `screen_refinement_start`), and exact terminal review progress comes from `screen_review_commit`/`screen_review_next`;
 - `tlh_portfolio.py:761`, malformed Flex lot/transaction cases, and `rebalance.py:2329` receive evidence/dispositions consistent with the preset contract.
 
 ## Full development environment

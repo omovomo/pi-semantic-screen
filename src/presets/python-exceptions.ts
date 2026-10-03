@@ -29,11 +29,11 @@ export const pythonExceptionsPreset: ScreeningPreset = {
   },
   review: {
     instructions:
-      "Judge only emitted evidence and its function/downstream/caller context. Absence of shown downstream evidence is not proof of no outward effect; missing context is INSUFFICIENT_EVIDENCE, not NO_OUTWARD_EFFECT.",
+      "Judge only emitted evidence. Missing downstream evidence is not proof of no outward effect; missing context is INSUFFICIENT_EVIDENCE, not NO_OUTWARD_EFFECT.",
     confirmWhen:
-      "CONFIRM only when hidden/changed failure materially changes core caller-visible/default/incomplete state. Silent loss of an authoritative source record qualifies unless omission is explicitly permitted and surfaced. Failed authoritative persisted-state read/parse returning a normal empty/default domain object also qualifies unless that defaulting is explicitly permitted and surfaced.",
+      "CONFIRM when hidden/changed failure materially changes core caller-visible/default/incomplete state. Proven skip of a malformed authoritative source record from a normally returned authoritative collection qualifies unless that exact omission is positively permitted/surfaced; do not require proof that no other reporting exists. Failed authoritative persisted-state read/parse returning a normal empty/default domain object likewise qualifies unless permitted/surfaced.",
     rejectWhen:
-      "Reject explicit failure, UI/display-only, cleanup/retry/telemetry, optional enrichment, and contract-permitted surfaced normalization. Rendering/formatting/table/chart/detail output is UI_ONLY unless evidence shows feedback into core data, persisted state, policy, screening, or execution. Silently skipping a malformed authoritative lot/transaction/record or defaulting failed authoritative persisted state is not EXPECTED_NORMALIZATION unless explicitly permitted and surfaced. Missing context is INSUFFICIENT_EVIDENCE, not NO_OUTWARD_EFFECT.",
+      "Reject explicit failure, UI/display-only, cleanup/retry/telemetry, optional enrichment, and permitted surfaced normalization. Rendering/formatting/table/chart/detail is UI_ONLY unless it feeds core data, persisted state, policy, screening, or execution. A proven authoritative-record skip is not INSUFFICIENT merely because separate reporting is unshown; reject only if that omission is positively surfaced/permitted. Missing context is INSUFFICIENT_EVIDENCE, not NO_OUTWARD_EFFECT.",
   },
   evidence: {
     targetItems: 60,

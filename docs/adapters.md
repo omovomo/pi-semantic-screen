@@ -17,7 +17,7 @@ discover({
 
 `count` should be cheap and must not build or return rich candidate text when the adapter can avoid it. This mode exists so `screen_preflight` can enforce the classifier-call guard before a large payload is created.
 
-`candidates` returns stable `{id,text}` items suitable for `screen_batch`.
+`candidates` returns stable `{id,text}` items. Canonical preset flows consume them internally in `screen_primary_start`; low-level/custom callers may still pass them to `screen_batch`.
 
 If deterministic discovery is incomplete because a source cannot be read or parsed, return `status:"error"`; do not silently omit that source.
 

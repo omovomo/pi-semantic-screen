@@ -8,6 +8,8 @@ test("extension exposes screening and extension-owned review tools", () => {
   for (const name of [
     "screen_preset",
     "screen_discover",
+    "screen_primary_start",
+    "screen_refinement_start",
     "screen_evidence",
     "screen_review_apply",
     "screen_review_start",
@@ -16,6 +18,10 @@ test("extension exposes screening and extension-owned review tools", () => {
     "screen_preflight",
     "screen_batch",
   ]) assert.match(source, new RegExp(`name:\\s*"${name}"`));
+  assert.match(source, /primaryStartOutputSchema/);
+  assert.match(source, /refinementStartOutputSchema/);
+  assert.match(source, /PresetScreeningWorkflowManager/);
+  assert.match(source, /exactPresetStageInput/);
   assert.match(source, /reviewStartOutputSchema/);
   assert.match(source, /reviewNextOutputSchema/);
   assert.match(source, /reviewCommitOutputSchema/);
@@ -57,4 +63,19 @@ test("stateful review tools start, return idempotent pending packets, and commit
   assert.match(source, /reviewDecisionCommitSchema = Type\.Union/);
   assert.match(source, /name:\s*"screen_review_next"[\s\S]*?const text = JSON\.stringify\(result\)/);
   assert.match(source, /name:\s*"screen_review_commit"[\s\S]*?const text = JSON\.stringify\(result\)/);
+});
+
+
+test("canonical preset screening never accepts model-supplied semantic contracts", () => {
+  assert.match(source, /name:\s*"screen_primary_start"[\s\S]*?parameters:\s*primaryStartParameters/);
+  assert.match(source, /name:\s*"screen_refinement_start"[\s\S]*?parameters:\s*refinementStartParameters/);
+  const primarySchema = source.slice(
+    source.indexOf("const primaryStartParameters"),
+    source.indexOf("const primaryStartOutputSchema"),
+  );
+  assert.doesNotMatch(primarySchema, /question:/);
+  assert.doesNotMatch(primarySchema, /criteria:/);
+  assert.doesNotMatch(primarySchema, /threshold:/);
+  assert.match(source, /contractSource:\s*"preset"/);
+  assert.match(source, /resultCache\.clear\(\)/);
 });

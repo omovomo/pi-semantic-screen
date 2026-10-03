@@ -10,6 +10,7 @@ import {
   type ClassifierContextLike,
   type ClassifierModelRef,
   type ScreeningInput,
+  type ScreeningResult,
   classifyBatch,
 } from "../src/engine.ts";
 import { ScreeningResultCache, runWithScreeningCache } from "../src/cache.ts";
@@ -25,6 +26,10 @@ import {
   type ReviewDecisionInput,
 } from "../src/review-apply.ts";
 import { ReviewWorkflowManager, type ReviewEvidencePacket } from "../src/review-workflow.ts";
+import {
+  PresetScreeningWorkflowManager,
+  exactPresetStageInput,
+} from "../src/preset-screening-workflow.ts";
 
 const DEFAULT_PROVIDER_MODEL: readonly [string, string] = ["openrouter", "typesafe/jev-1.13"];
 const PROVIDER_ORDER = ["openrouter", "typesafe", "opencode", "vercel-ai-gateway", "cloudflare-workers-ai"];
@@ -74,7 +79,7 @@ function agentMessageText(message: unknown): string {
 }
 
 function isSemanticScreenPrompt(prompt: string): boolean {
-  return /semantic_screen_review_state|screen_preset|screen_discover|screen_evidence|screen_review_apply|screen_review_start|screen_review_next|screen_review_commit|screen_preflight|screen_batch|screen-use|screen-exceptions|screen-continue/i.test(prompt);
+  return /semantic_screen_review_state|screen_preset|screen_discover|screen_primary_start|screen_refinement_start|screen_evidence|screen_review_apply|screen_review_start|screen_review_next|screen_review_commit|screen_preflight|screen_batch|screen-use|screen-exceptions|screen-continue/i.test(prompt);
 }
 
 function isSemanticScreenComplete(text: string): boolean {
@@ -679,6 +684,99 @@ const reviewCommitOutputSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const screeningStageSummarySchema = Type.Object(
+  {
+    total: Type.Integer({ minimum: 0 }),
+    kept: Type.Integer({ minimum: 0 }),
+    dropped: Type.Integer({ minimum: 0 }),
+    undecided: Type.Integer({ minimum: 0 }),
+    withheld: Type.Integer({ minimum: 0 }),
+    errors: Type.Integer({ minimum: 0 }),
+    retained: Type.Integer({ minimum: 0 }),
+    model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() }, { additionalProperties: false })),
+    reusedScreening: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+const primaryStartParameters = Type.Object(
+  {
+    preset: Type.String({ minLength: 1 }),
+    scope: Type.String({ minLength: 1 }),
+    confirm: Type.Optional(Type.Boolean({ description: "Set true only after explicit approval when the primary call guard requires it." })),
+    deferReview: Type.Optional(Type.Boolean({ description: "Set true only for an explicitly requested refinement path." })),
+    provider: Type.Optional(Type.String({ minLength: 1 })),
+    model: Type.Optional(Type.String({ minLength: 1 })),
+    rescreen: Type.Optional(Type.Boolean({ description: "Explicitly discard the canonical primary initialization and run it again." })),
+  },
+  { additionalProperties: false },
+);
+
+const primaryStartOutputSchema = Type.Object(
+  {
+    status: Type.Union([Type.Literal("ok"), Type.Literal("approval_required"), Type.Literal("error")]),
+    preset: Type.String(),
+    scope: Type.String(),
+    primaryRunId: Type.Optional(Type.String()),
+    primary: Type.Optional(screeningStageSummarySchema),
+    reviewStarted: Type.Boolean(),
+    workflowId: Type.Optional(Type.String()),
+    progress: Type.Optional(reviewWorkflowProgressSchema),
+    refinementAvailable: Type.Boolean(),
+    refinementDeferred: Type.Boolean(),
+    reusedInitialization: Type.Boolean(),
+    projectedCalls: Type.Optional(Type.Integer({ minimum: 0 })),
+    callLimit: Type.Optional(Type.Integer({ minimum: 1 })),
+    issues: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
+const refinementSummarySchema = Type.Object(
+  {
+    total: Type.Integer({ minimum: 0 }),
+    kept: Type.Integer({ minimum: 0 }),
+    dropped: Type.Integer({ minimum: 0 }),
+    undecided: Type.Integer({ minimum: 0 }),
+    withheld: Type.Integer({ minimum: 0 }),
+    errors: Type.Integer({ minimum: 0 }),
+    retained: Type.Integer({ minimum: 0 }),
+    model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() }, { additionalProperties: false })),
+    reusedScreening: Type.Boolean(),
+    refinementYield: Type.Number({ minimum: 0, maximum: 1 }),
+    lowYield: Type.Boolean(),
+  },
+  { additionalProperties: false },
+);
+
+const refinementStartParameters = Type.Object(
+  {
+    primaryRunId: Type.String({ minLength: 1 }),
+    confirm: Type.Optional(Type.Boolean({ description: "Set true only after explicit approval when the refinement call guard requires it." })),
+    rescreen: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
+
+const refinementStartOutputSchema = Type.Object(
+  {
+    status: Type.Union([Type.Literal("ok"), Type.Literal("approval_required"), Type.Literal("error")]),
+    preset: Type.Optional(Type.String()),
+    scope: Type.Optional(Type.String()),
+    primaryRunId: Type.Optional(Type.String()),
+    primary: Type.Optional(screeningStageSummarySchema),
+    refinement: Type.Optional(refinementSummarySchema),
+    reviewStarted: Type.Boolean(),
+    workflowId: Type.Optional(Type.String()),
+    progress: Type.Optional(reviewWorkflowProgressSchema),
+    reusedInitialization: Type.Boolean(),
+    projectedCalls: Type.Optional(Type.Integer({ minimum: 0 })),
+    callLimit: Type.Optional(Type.Integer({ minimum: 1 })),
+    issues: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
 const preflightOutputSchema = Type.Object(
   {
     status: Type.Union([Type.Literal("ok"), Type.Literal("approval_required")]),
@@ -793,11 +891,61 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
   let semanticScreenWorkflowActive = false;
   let compactionInFlight = false;
   const reviewWorkflows = new ReviewWorkflowManager();
+  const presetScreeningWorkflows = new PresetScreeningWorkflowManager();
+
+  const presetWorkflowDependencies = (
+    signal?: AbortSignal,
+    onScreened?: (screened: { result: Awaited<ReturnType<typeof classifyBatch>>; reused: boolean }) => void,
+  ) => ({
+    async discoverCandidates(request: { preset: ReturnType<typeof getPreset>; scope: string; signal?: AbortSignal }) {
+      const adapter = getAdapter(request.preset.adapter);
+      return adapter.discover({ scope: request.scope, mode: "candidates", signal: request.signal });
+    },
+    async runStage(request: {
+      preset: ReturnType<typeof getPreset>;
+      stage: "primary" | "refinement";
+      items: Array<{ id: string; text: string }>;
+      confirm: boolean;
+      provider?: string;
+      model?: string;
+      rescreen?: boolean;
+      signal?: AbortSignal;
+    }) {
+      const input = exactPresetStageInput(request.preset, request.stage, request.items, {
+        confirm: request.confirm,
+        provider: request.provider,
+        model: request.model,
+        rescreen: request.rescreen,
+      });
+      const screened = await runWithScreeningCache(input, resultCache, () =>
+        classifyBatch(input, createBackend(request.signal ?? signal), {
+          callLimit: parsePositiveEnvInt("PI_SEMANTIC_SCREEN_CALL_LIMIT", 200, 100_000),
+          concurrency: parsePositiveEnvInt("PI_SEMANTIC_SCREEN_CONCURRENCY", 12, 64),
+          contextSafetyFraction: 0.85,
+          estimateTokens: estimateClassifierTokens,
+          redact: redactSecrets,
+          signal: request.signal ?? signal,
+        }),
+      );
+      onScreened?.(screened);
+      return screened;
+    },
+    startReview(request: { preset: ReturnType<typeof getPreset>; scope: string; reviewTargetIds: string[] }) {
+      return reviewWorkflows.start({
+        preset: request.preset.id,
+        scope: request.scope,
+        reviewTargetIds: request.reviewTargetIds,
+        targetItems: request.preset.evidence.targetItems,
+      });
+    },
+  });
 
   pi.on("session_start", () => {
     semanticScreenWorkflowActive = false;
     compactionInFlight = false;
     reviewWorkflows.reset();
+    presetScreeningWorkflows.reset();
+    resultCache.clear();
   });
 
   pi.on("before_agent_start", (event) => {
@@ -831,7 +979,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         compactionInFlight = true;
         ctx.compact({
           customInstructions:
-            "Preserve the user's semantic-screen task, approvals, exact compact screening/review counts, confirmed findings, and resumable-state semantics. Exact review accounting lives in the extension-owned review workflow state behind screen_review_start/next/commit. Preserve the active workflow id if visible. Drop superseded raw evidence/source excerpts and intermediate orchestration/tool chatter. Do not invent reviewed IDs, evidence coverage, blocked items, or findings.",
+            "Preserve the user's semantic-screen task, approvals, exact compact screening/review counts, confirmed findings, and resumable-state semantics. Preset primary/refinement semantics and retained IDs live in extension-owned screening state; exact review accounting lives in the extension-owned review workflow state behind screen_review_start/next/commit. Preserve primaryRunId when refinement is deferred and preserve the active workflow id if visible. Drop superseded raw evidence/source excerpts and intermediate orchestration/tool chatter. Do not invent retained/reviewed IDs, evidence coverage, blocked items, or findings.",
           onComplete: () => {
             compactionInFlight = false;
           },
@@ -904,6 +1052,115 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         content: [{ type: "text", text }],
         details: { preset: preset.id, adapter: adapter.id },
         structuredContent: structuredResult as unknown as JsonValue,
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "screen_primary_start",
+    label: "Semantic preset primary start",
+    description:
+      "Run a preset's exact extension-owned primary classifier contract, retain unresolved ids, and atomically start semantic review. The caller never supplies question, criteria, threshold, or reviewTargetIds.",
+    promptSnippet: "Run canonical preset-owned primary screening and start review",
+    parameters: primaryStartParameters,
+    outputSchema: primaryStartOutputSchema,
+    executionMode: "sequential",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    async execute(_toolCallId, params, signal) {
+      const request = params as {
+        preset: string;
+        scope: string;
+        confirm?: boolean;
+        deferReview?: boolean;
+        provider?: string;
+        model?: string;
+        rescreen?: boolean;
+      };
+      const preset = getPreset(request.preset);
+      let screenedAccounting: ScreeningResult["classifierAccounting"];
+      let screenedReused = false;
+      const result = await presetScreeningWorkflows.startPrimary(
+        {
+          preset,
+          scope: request.scope,
+          confirm: request.confirm === true,
+          deferReview: request.deferReview,
+          provider: request.provider,
+          model: request.model,
+          rescreen: request.rescreen,
+          signal,
+        },
+        presetWorkflowDependencies(signal, (screened) => {
+          screenedAccounting = screened.result.classifierAccounting;
+          screenedReused = screened.reused;
+        }),
+      );
+      const toolUsage =
+        !screenedReused && screenedAccounting?.complete && screenedAccounting.calls > 0 && screenedAccounting.usage
+          ? screenedAccounting.usage
+          : undefined;
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: {
+          primaryRunId: result.primaryRunId ?? null,
+          workflowId: result.workflowId ?? null,
+          contractSource: "preset",
+        },
+        structuredContent: result as unknown as JsonValue,
+        ...(toolUsage ? { usage: toolUsage } : {}),
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "screen_refinement_start",
+    label: "Semantic preset refinement start",
+    description:
+      "Continue a deferred canonical primary run with the preset's exact extension-owned refinement contract, then start semantic review from the refined retained ids.",
+    promptSnippet: "Run exact preset-owned refinement after an explicitly requested refinement path",
+    parameters: refinementStartParameters,
+    outputSchema: refinementStartOutputSchema,
+    executionMode: "sequential",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    async execute(_toolCallId, params, signal) {
+      const request = params as { primaryRunId: string; confirm?: boolean; rescreen?: boolean };
+      let screenedAccounting: ScreeningResult["classifierAccounting"];
+      let screenedReused = false;
+      const result = await presetScreeningWorkflows.startRefinement(
+        {
+          primaryRunId: request.primaryRunId,
+          confirm: request.confirm === true,
+          rescreen: request.rescreen,
+          signal,
+        },
+        presetWorkflowDependencies(signal, (screened) => {
+          screenedAccounting = screened.result.classifierAccounting;
+          screenedReused = screened.reused;
+        }),
+      );
+      const toolUsage =
+        !screenedReused && screenedAccounting?.complete && screenedAccounting.calls > 0 && screenedAccounting.usage
+          ? screenedAccounting.usage
+          : undefined;
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: {
+          primaryRunId: result.primaryRunId ?? null,
+          workflowId: result.workflowId ?? null,
+          contractSource: "preset",
+        },
+        structuredContent: result as unknown as JsonValue,
+        ...(toolUsage ? { usage: toolUsage } : {}),
       };
     },
   });
@@ -1178,6 +1435,10 @@ export {
   presetOutputSchema,
   discoverParameters,
   discoverOutputSchema,
+  primaryStartParameters,
+  primaryStartOutputSchema,
+  refinementStartParameters,
+  refinementStartOutputSchema,
   evidenceParameters,
   evidenceOutputSchema,
   reviewApplyParameters,

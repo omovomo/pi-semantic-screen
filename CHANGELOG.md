@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.2 - 2026-10-03
+
+- Fix expanded Python evidence for exception handlers outside functions: `handler_control_flow` is now initialized for every expanded candidate and no longer raises `UnboundLocalError` when `function_node` is absent.
+- Add regression coverage for module-level exception handlers and preserve the 0.6.1 fan-out/whole-handler evidence behavior unchanged.
+
+## 0.6.1 - 2026-10-03
+
+- Improve bounded returned-object fan-out evidence: small exact caller sets now preserve exact consumer shapes even when the immediate consumer delegates its guard/decision logic, rather than collapsing those sites to unresolved.
+- Resolve returned objects consumed directly as exact call arguments (for example `evaluate(build_input())`) without inventing an intermediate variable; wrapped/transformed calls remain unresolved.
+- Add compact `handler_control_flow` to expanded Python exception evidence, summarizing branch count/tests, explicit `return`/`raise`/`continue`/`break` exits, whether the handler can fall through, and the single downstream fallthrough target.
+- Keep canonical `screen_primary_start` ownership, review state machine, authoritative-record contract, generic two-call-edge bound, and 7200-token packet budget unchanged.
+- Add regressions for delegated consumer fan-out, direct returned-object consumers, and multi-branch handler exit topology.
+
+## 0.6.0 - 2026-10-03
+
+- Move canonical preset primary semantics out of model-generated orchestration: add `screen_primary_start`, which performs candidate discovery internally, loads the exact preset primary question/criteria/threshold inside the extension, computes retained IDs, and starts review atomically.
+- Add process-local `PresetScreeningWorkflowManager`: the first successful `preset+scope` primary initialization is canonical until explicit `rescreen:true`; repeated calls reuse the same initialization without rediscovery/classifier calls. Approval-required/error runs never become canonical state, and screening/result-cache state resets on `session_start`.
+- Add extension-owned optional refinement with `screen_refinement_start`: `deferReview:true` stores primary retained candidates behind an opaque `primaryRunId`; refinement applies the exact preset refinement contract with its own call guard and starts review from refined retained IDs.
+- Keep `screen_batch` and `screen_review_start` as low-level/ad-hoc compatibility APIs; canonical preset prompts no longer pass candidate arrays, semantic contracts, or `reviewTargetIds` through model context.
+- Strengthen Python authoritative-record semantics: once evidence proves a malformed authoritative record is skipped from a normally returned authoritative collection, review should confirm unless that exact omission is positively shown permitted/surfaced; absence of separate reporting evidence alone is not insufficiency.
+- Add bounded returned-object fan-out evidence for small exact caller sets. `policy_terminal_flow` reports `resolved/unresolved` consumer counts instead of arbitrarily selecting one caller; fan-out above eight sites remains explicitly unresolved.
+- Preserve review dispositions, review state machine, blocked quarantine, the generic two-call-edge bound, and the 7200-token packet budget.
+- Add regressions for extension-owned primary/refinement contracts, canonical initialization reuse, guarded refinement, returned `PolicyInput` fan-out, partial fan-out accounting, inline constructor fan-out, and large-fan-out bounding.
+
 ## 0.5.9 - 2026-10-03
 
 - Follow exact fallback-return bindings through constructors returned directly from builder functions, then resume bounded tracing from the builder result in its immediate caller.

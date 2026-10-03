@@ -11,7 +11,7 @@ A preset defines:
 - review `instructions`, `confirmWhen`, `rejectWhen`;
 - evidence packet defaults (`targetItems`, source/character caps, token budget).
 
-The canonical flow loads a preset once, screens deterministic candidates, then passes exact retained IDs to `screen_review_start`. From that point the extension owns queueing/accounting; the preset's review policy is embedded into every packet returned by `screen_review_next`.
+The canonical flow performs count-only discovery/preflight, then `screen_primary_start` loads the preset again inside the extension, performs candidate discovery internally, applies the exact preset primary contract, computes retained IDs, and starts review. The model never copies the preset question/criteria/threshold or retained IDs. The preset's review policy is embedded into every packet returned by `screen_review_next`.
 
 ## Adding a preset
 
@@ -21,7 +21,7 @@ A use-case-specific alias prompt is optional and should stay tiny.
 
 ## Refinement
 
-Refinement is opt-in. A large retained set does not authorize another classifier pass. If refinement is requested, it has its own preflight/approval boundary and produces the exact review target passed to `screen_review_start`.
+Refinement is opt-in. A large retained set does not authorize another classifier pass. If refinement is requested, primary initialization is deferred and `screen_refinement_start` runs the exact preset refinement contract over extension-owned retained primary candidates. Refinement has its own call guard/approval boundary and starts review from its exact retained IDs without model reconstruction.
 
 ## Review contract
 

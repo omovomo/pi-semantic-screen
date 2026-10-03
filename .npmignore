@@ -2,3 +2,7 @@ node_modules/
 *.tgz
 *.py[cod]
 __pycache__/
+**/__pycache__/
+**/*.py[cod]
+src/adapters/__pycache__/
+src/adapters/*.pyc

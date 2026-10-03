@@ -2,15 +2,20 @@
 
 Adapter-driven semantic screening for Pi: cheaply classify many candidates, then perform bounded deep review over deterministic evidence.
 
-Version **0.5.9** keeps the proven 0.5.x primary/review state machine unchanged and tightens expanded Python evidence at constructor/evaluator boundaries. Exact fallback returns can now flow through directly returned constructors or inline constructor keyword values, and an already-proven evaluator guard may expose one immediate caller-visible result sink. `policy_terminal_flow` requires an exact constructor-field binding before accepting a guarded terminal path. Primary threshold, review dispositions, the two generic call-edge bound, and the 7200-token packet budget remain unchanged.
+Version **0.6.2** keeps the extension-owned preset screening architecture from 0.6.0 and improves expanded Python evidence. It also fixes expanded evidence for module/class-level exception handlers by initializing and emitting `handler_control_flow` independently of function-level data-flow analysis. Small exact returned-object fan-out now preserves consumer shapes even when decision logic is delegated, direct forms such as `evaluate(build_input())` are resolved structurally, and `handler_control_flow` summarizes complete handler branch/exit topology plus the common fallthrough target. Review dispositions, canonical primary ownership, the two generic call-edge bound, and the 7200-token packet budget remain unchanged.
 
 ## Architecture at a glance
 
 ```text
-screen_preset / screen_preflight / screen_batch   generic screening
+screen_preset + count discovery + screen_preflight
                     |
                     v
-screen_review_start                               create extension-owned workflow
+screen_primary_start                              exact preset primary contract
+      |                                           retained IDs owned by extension
+      +-- optional defer --> screen_refinement_start
+                    |
+                    v
+extension-owned ReviewWorkflowManager
                     |
                     v
 screen_review_next  --> evidence + reviewContract
@@ -28,7 +33,8 @@ Use cases stay small:
 
 - semantic policy belongs in a **preset**;
 - deterministic source discovery/evidence belongs in an **adapter**;
-- generic screening stays in `screen_batch`;
+- canonical preset screening contracts and retained IDs stay in extension-owned screening state;
+- `screen_batch` remains the generic ad-hoc classifier primitive;
 - review accounting/state ownership stays in the extension.
 
 Do not create a new large `/screen-foo` prompt for every use case. If an existing adapter fits, add a preset. Only genuinely new source semantics require a new adapter.
@@ -58,7 +64,7 @@ pi -e ./pi-semantic-screen
 GitHub tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.5.9
+pi install git:github.com/<owner>/pi-semantic-screen@v0.6.2
 ```
 
 See [Git installation and repository setup](docs/git-install.md).
@@ -83,7 +89,7 @@ Optional explicit refinement:
 /screen-use python-exceptions garp_cli/ --refine
 ```
 
-For guarded batches above the configured call limit, `/screen-use` stops at preflight for explicit approval. After approval the canonical primary `screen_batch` is invoked with `confirm:true`; if it still returns a non-`ok` status, review is not started.
+For guarded batches above the configured call limit, `/screen-use` stops at preflight for explicit approval. After approval `screen_primary_start` runs the exact preset-owned primary contract with `confirm:true`; the model never reconstructs classifier semantics or retained IDs. If primary screening is non-`ok`, review is not started.
 
 Continue an incomplete semantic review:
 
@@ -111,7 +117,7 @@ await tools.screen_discover({
 });
 ```
 
-Count mode is for preflight and returns no rich candidate array. Candidate mode returns stable `{id,text}` items for `screen_batch`.
+Count mode is for preflight and returns no rich candidate array. Candidate mode remains a low-level API; canonical preset initialization discovers rich candidates internally inside `screen_primary_start`.
 
 ### `screen_preflight`
 
@@ -123,9 +129,25 @@ await tools.screen_preflight({ count: 524 });
 
 Default call limit is 200. Above it, explicit user approval is required before classifier calls.
 
+### `screen_primary_start`
+
+Canonical preset initialization. The caller supplies only preset/scope plus guard/model options; there are no `question`, `criteria`, `threshold`, candidate-text, or `reviewTargetIds` parameters. The extension:
+
+1. loads the preset;
+2. discovers candidates internally;
+3. applies the exact preset primary contract;
+4. computes `kept + undecided + withheld + errors`;
+5. creates the review workflow atomically.
+
+The first successful `preset+scope` initialization is canonical for the active Pi session unless `rescreen:true` is explicit. Use `deferReview:true` only for an explicitly requested refinement path.
+
+### `screen_refinement_start`
+
+Continues a deferred primary run using the exact preset refinement contract and extension-owned retained candidates. It has its own call guard; an `approval_required` result performs zero refinement classifier calls. On success it starts review from refinement-retained IDs and reports `refinementYield` / `lowYield`.
+
 ### `screen_batch`
 
-Generic boolean classifier primitive. For probability `p` and threshold `t`:
+Generic boolean classifier primitive for ad-hoc/low-level workflows. For probability `p` and threshold `t`:
 
 ```text
 p >= t       => kept
@@ -143,7 +165,7 @@ Errors and aborts never become `dropped`. Successful identical runs are reused f
 
 ### `screen_review_start`
 
-Creates the extension-owned semantic-review workflow from the exact retained IDs:
+Low-level compatibility API. Canonical preset flows do not call it directly; `screen_primary_start` / `screen_refinement_start` create review state internally. For custom integrations it creates the extension-owned semantic-review workflow from exact retained IDs:
 
 ```ts
 await tools.screen_review_start({
@@ -205,11 +227,11 @@ Missing, duplicate, extra, or stale packet dispositions fail closed and do not a
 
 ### Low-level `screen_evidence` / `screen_review_apply`
 
-These remain available for tests, custom integrations, and ad-hoc low-level workflows. Canonical preset workflows use `screen_review_start` / `screen_review_next` / `screen_review_commit` so review state ownership stays inside the extension.
+These remain available for tests, custom integrations, and ad-hoc low-level workflows. Canonical preset workflows use `screen_primary_start` / optional `screen_refinement_start`, then `screen_review_next` / `screen_review_commit`, so semantic contracts, retained IDs, and review state all stay inside the extension.
 
-## Review state ownership
+## Screening and review state ownership
 
-The extension keeps exact process-local review state:
+The extension keeps exact process-local preset-screening state (`primaryRunId`, canonical primary result, retained primary candidates when refinement is deferred) plus exact review state:
 
 ```text
 reviewTargetIds
@@ -233,9 +255,9 @@ pending packet cannot advance without an exact commit
 expanded insufficient evidence blocks only that ID
 ```
 
-The model never serializes or merges these sets. This eliminates model-generated set arithmetic, stale expanded queues, accidental duplicate packets, empty-ID fetches, and manual state-merge errors.
+The model never serializes preset semantic contracts, retained candidate IDs, or these review sets. This eliminates classifier-contract drift, model-generated retained-ID arithmetic, stale expanded queues, accidental duplicate packets, empty-ID fetches, and manual state-merge errors.
 
-Review state survives normal turns and host context compaction because it is owned by the extension process. **Restarting Pi clears active review workflows.** Start a fresh screen after a process restart.
+Screening/review state survives normal turns and host context compaction because it is owned by the extension process. **Restarting Pi clears active primary/refinement and review workflows.** Start a fresh screen after a process restart.
 
 ## Review contract
 
@@ -286,7 +308,7 @@ The adapter is bundled deterministic Python, not model-generated code. It fails 
 
 ## Classifier selection
 
-`screen_batch` selects only Pi models of type `classifier` that are available/configured.
+Canonical preset screening (`screen_primary_start` / `screen_refinement_start`) and low-level `screen_batch` select only Pi models of type `classifier` that are available/configured.
 
 Order:
 
@@ -311,15 +333,15 @@ Context compaction defaults to host/Pi context management. `PI_SEMANTIC_SCREEN_C
 
 ## Usage accounting
 
-When every classifier call reports usage, `screen_batch` aggregates exact classifier token/cost usage and publishes it as tool-result usage. If any call omits usage, accounting is marked incomplete rather than fabricated.
+When every classifier call reports usage, `screen_primary_start`, `screen_refinement_start`, and low-level `screen_batch` publish exact classifier token/cost usage for calls they actually execute. If any call omits usage, accounting is marked incomplete rather than fabricated.
 
 Process-local result reuse reports zero new classifier usage.
 
 ## Security and egress
 
-Remote classifier egress is limited to explicit `screen_batch` item text, question, and criteria after conservative redaction.
+Remote classifier egress is limited to candidate text plus semantic question/criteria after conservative redaction. In canonical preset flows those semantic fields are loaded from the local preset registry inside the extension; the model does not supply them.
 
-Discovery, evidence extraction, review-state transitions, and review commit are local. The Python adapter does not use the network. Active review evidence may be retained temporarily in process memory only while a packet is pending; it is dropped after commit.
+Discovery, preset workflow state, evidence extraction, review-state transitions, and review commit are local. The Python adapter does not use the network. Active review evidence may be retained temporarily in process memory only while a packet is pending; it is dropped after commit.
 
 See [SECURITY.md](SECURITY.md).
 
@@ -333,6 +355,7 @@ src/cache.ts                  process-local screening result cache
 src/evidence-budget.ts        token-bounded evidence transport
 src/review-contract.ts        disposition vocabulary / preset contract
 src/review-apply.ts           pure exact disposition validation
+src/preset-screening-workflow.ts extension-owned primary/refinement state
 src/review-workflow.ts        extension-owned review state machine
 src/adapters/                 deterministic source adapters
 src/presets/                  semantic policy presets
