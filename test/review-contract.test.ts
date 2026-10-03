@@ -7,6 +7,7 @@ test("review contract exposes explicit terminal/non-terminal dispositions", () =
   const contract = buildReviewContract(pythonExceptionsPreset);
   assert.deepEqual(contract.dispositions.map((entry) => entry.id), [...REVIEW_DISPOSITION_IDS]);
   assert.match(contract.rejectWhen, /UI\/display-only/i);
+  assert.match(contract.rejectWhen, /Rendering\/formatting\/table\/chart\/detail output is UI_ONLY/i);
   assert.equal(contract.dispositions.find((entry) => entry.id === "CONFIRM")?.finding, true);
   assert.equal(contract.dispositions.find((entry) => entry.id === "UI_ONLY")?.finding, false);
   assert.equal(contract.dispositions.find((entry) => entry.id === "INSUFFICIENT_EVIDENCE")?.terminal, false);
@@ -27,4 +28,5 @@ test("review contract stays compact while retaining fail-closed semantic rules",
   assert.match(contract.confirmWhen, /persisted-state read\/parse/i);
   assert.match(contract.rejectWhen, /malformed authoritative lot\/transaction\/record/i);
   assert.match(contract.rejectWhen, /Missing context is INSUFFICIENT_EVIDENCE/i);
+  assert.match(contract.dispositions.find((entry) => entry.id === "UI_ONLY")?.description ?? "", /persisted state, policy, screening, or execution/i);
 });

@@ -47,7 +47,7 @@ const DISPOSITIONS: ReviewDispositionDefinition[] = [
     terminal: true,
     finding: false,
     description:
-      "Display/UI-only effect with no feedback into core data/control state.",
+      "Display/formatting effect with no feedback into core data, persisted state, policy, screening, or execution.",
   },
   {
     id: "OPTIONAL_ENRICHMENT",

@@ -2,7 +2,7 @@
 
 Adapter-driven semantic screening for Pi: cheaply classify many candidates, then perform bounded deep review over deterministic evidence.
 
-Version **0.5.3** keeps the proven 0.5.x primary/review state machine and focuses on review robustness and evidence efficiency. `screen_review_commit` now tolerates compact tuple-form dispositions as well as objects, the review contract is smaller but still self-contained, and expanded Python evidence surfaces targeted validation/core-call/persistence/caller context before falling back to generic function-tail text.
+Version **0.5.9** keeps the proven 0.5.x primary/review state machine unchanged and tightens expanded Python evidence at constructor/evaluator boundaries. Exact fallback returns can now flow through directly returned constructors or inline constructor keyword values, and an already-proven evaluator guard may expose one immediate caller-visible result sink. `policy_terminal_flow` requires an exact constructor-field binding before accepting a guarded terminal path. Primary threshold, review dispositions, the two generic call-edge bound, and the 7200-token packet budget remain unchanged.
 
 ## Architecture at a glance
 
@@ -58,7 +58,7 @@ pi -e ./pi-semantic-screen
 GitHub tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.5.3
+pi install git:github.com/<owner>/pi-semantic-screen@v0.5.9
 ```
 
 See [Git installation and repository setup](docs/git-install.md).
@@ -276,6 +276,9 @@ Candidate/evidence data includes:
 - function returns and lightweight call-site hints;
 - expanded targeted data-flow hints: `tracked`, `pre_try_writes`, `post_handler_reads`;
 - expanded semantic hints: `post_handler_controls`, `post_handler_calls`, `persistence_calls`;
+- expanded value-directed `interprocedural_flow` with exact bindings, at most two call edges, and fail-closed `terminal=unknown` on ambiguity;
+- `sentinel_handling` for exact `None`/`UNKNOWN`/empty/NaN-style fallback origins plus bounded guards/consumers;
+- `policy_terminal_flow` for exact constructor/result binding into policy/evaluator guards and bounded branch outcomes;
 - wider bounded caller context for unresolved cases;
 - bounded function-tail context as a final generic fallback.
 

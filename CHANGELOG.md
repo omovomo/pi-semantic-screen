@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.5.9 - 2026-10-03
+
+- Follow exact fallback-return bindings through constructors returned directly from builder functions, then resume bounded tracing from the builder result in its immediate caller.
+- Bind inline helper fallbacks used directly as constructor keyword values (for example `PolicyInput(field=helper())`) without inventing an intermediate local variable; only exact direct keyword values qualify.
+- Add one terminal-result continuation after an already-proven evaluator guard outcome so a concrete returned state can be connected to its immediate caller-visible return/container sink without adding a third generic call edge.
+- Tighten `policy_terminal_flow`: an exact project constructor-field binding is now required before a downstream guard/outcome is accepted as policy-terminal evidence, reducing incidental snapshot/policy branch matches.
+- Keep state ownership, primary threshold, disposition vocabulary, two generic call-edge bound, blocked quarantine, and 7200-token transport budget unchanged.
+- Add regressions for direct-return constructors, inline constructor helpers, and evaluator-result propagation into a returned snapshot.
+
+## 0.5.8 - 2026-10-03
+
+- Treat direct handler `return None` / `return UNKNOWN`-style fallbacks as synthetic affected values in expanded evidence and, when there is exactly one function definition and one caller site, surface the exact `return -> caller variable` binding.
+- Continue those exact fallback-return bindings through project data/policy constructors and into exact callee guards with explicit bounded `return`/`raise`/state outcomes; remove policy/snapshot name matching as a prerequisite so evidence is structural rather than keyword-driven.
+- Tighten `sentinel_handling`: do not report a pre-try empty list/mapping/set as the resulting sentinel when the handler mutates that container or the try body may have partially populated it before failure.
+- Reject structural branch matches as `policy_terminal_flow` unless the exact bound parameter reaches a guard/validation with an explicit bounded outcome, reducing snapshot/fingerprint false positives.
+- Keep review state, primary threshold, disposition vocabulary, two-edge bound, blocked quarantine, and 7200-token packet budget unchanged.
+- Add regressions for `return None -> caller -> PolicyInput -> evaluator`, `return UNKNOWN`, handler-mutated empty lists, partially populated mappings, and false-positive snapshot branches.
+
+## 0.5.7 - 2026-10-03
+
+- Add `sentinel_handling` to expanded Python evidence: detect structurally obvious handler/pre-try `None`, `UNKNOWN`/missing-style strings, empty containers, and NaN-style sentinels, then show their first bounded guard and outward consumer without inferring safety.
+- Add `policy_terminal_flow`: connect exact affected-value constructor bindings to policy/evaluator calls, surface the first exact callee guard/validation over the bound parameter, and include a bounded explicit branch outcome.
+- Preserve fail-closed semantics: handler-assigned sentinels outrank preserved pre-try values, the nearest prior sentinel is used, ambiguous bindings remain unresolved, and the new evidence never assigns review dispositions.
+- Keep the 0.5.x review state machine, primary threshold, disposition vocabulary, two-call-edge interprocedural bound, and 7200-token packet budget unchanged.
+- Add regressions for preserved pre-try fail-closed sentinels, handler-assigned `UNKNOWN`, policy-input-to-evaluator terminal guards, and nearest-sentinel selection.
+
+## 0.5.6 - 2026-10-03
+
+- Treat tracked `mapping.get(...)`/common container accessors as local reads rather than interprocedural call edges, preventing project-local `get` methods from creating false ambiguity.
+- Propagate exact tracked keyword values through project data/policy constructors into the assigned result variable, then continue bounded tracing from that constructed object without consuming a call edge.
+- Rank persistence/policy/core propagation above logging/render/display calls when selecting exact tracked call edges; ranking changes evidence selection only and never decides a review disposition.
+- Keep ambiguous required returned hops fail-closed with `terminal=unknown`, and prevent ambiguous evidence from being paired with a contradictory normal-return terminal.
+- Strengthen `UI_ONLY`: rendering/formatting/table/chart/detail output remains UI-only unless evidence shows feedback into core data, persisted state, policy, screening, or execution.
+- Add regressions for mapping-accessor ambiguity, constructor-to-policy propagation, semantic sink ranking past logging, and ambiguous returned second hops.
+
+## 0.5.5 - 2026-10-03
+
+- Track subscript assignments such as `mapping[key] = value` as mutations of the base container, so omission/fallback flows can follow the outward collection identity.
+- Model handler control transfer explicitly: `continue` now records a bounded current-iteration omission and the skipped collection mutations instead of pretending the loop tail executes; `break`/`raise` are surfaced as loop termination / explicit failure.
+- Fix exact positional binding for bound instance/class methods so `obj.method(x)` maps `x` to the parameter after `self`/`cls`, while explicit `Class.method(obj, x)` remains unshifted.
+- Prefer resolvable tracked-value calls over incidental unresolved calls when selecting interprocedural propagation, allowing real second-hop evidence without increasing the two-edge bound.
+- Recognize exact tracked keyword bindings into returned project data containers and emit them as caller-visible return evidence.
+- Reduce noisy affected-value sets by retaining try/handler assignments that are actually read after the handler, while preserving direct handler assignments.
+- Add regressions for subscript mutation/returned-container flow, `continue` omission, bound-method binding, and second-hop selection past incidental unresolved calls.
+
+## 0.5.4 - 2026-10-03
+
+- Add value-directed interprocedural tracing to expanded `python-exceptions` evidence while leaving the review state machine, primary threshold, review contract, and 7200-token transport budget unchanged.
+- Trace exact tracked-value bindings through local calls or one caller boundary, with a hard maximum of two call edges and bounded snippets.
+- Fail closed on ambiguous/unresolved function bindings with `terminal=unknown`; no callee semantics are guessed from names.
+- Surface a compact `interprocedural_flow` section alongside existing local data-flow/semantic hints, including exact origin, bindings, bounded edges, and terminal evidence.
+- Add adapter regressions for fallback-return propagation, argument binding, two-hop bounding, and ambiguous-callee handling.
+
 ## 0.5.3 - 2026-10-03
 
 - Accept both object dispositions and compact `[id, disposition, rationale]` tuples in `screen_review_commit`; normalize them inside the extension-owned workflow before exact coverage validation, preventing a model-formatting retry without weakening fail-closed semantics.

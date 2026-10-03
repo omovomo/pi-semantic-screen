@@ -1,6 +1,6 @@
 {
   "name": "pi-semantic-screen",
-  "version": "0.5.3",
+  "version": "0.5.9",
   "type": "module",
   "description": "Adapter-driven semantic screening and extension-owned evidence review for Pi",
   "keywords": [

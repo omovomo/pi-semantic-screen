@@ -1,6 +1,4 @@
 node_modules/
 *.tgz
-*.pyc
+*.py[cod]
 __pycache__/
-src/adapters/__pycache__/
-src/adapters/*.pyc

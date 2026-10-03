@@ -40,7 +40,7 @@ Return:
 - `items`: evidence records in the same order;
 - `sourceCount` and `chars`;
 - `status:"error"` on stale/unresolvable targets or source failures;
-- expanded detail adds targeted data-flow hints (`tracked`, `pre_try_writes`, `post_handler_reads`), post-handler validation/control hints, core calls using tracked values, persistence/save calls, and wider bounded caller context; generic function-tail text remains a bounded fallback for IDs unresolved at standard detail.
+- expanded detail adds targeted data-flow hints (`tracked`, `pre_try_writes`, `post_handler_reads`), post-handler validation/control hints, core calls using tracked values, persistence/save calls, exact sentinel/default handling (including direct fallback-return origins and mutable-container suppression), bounded exact caller/constructor/evaluator terminal guards, value-directed interprocedural flow, and wider bounded caller context; generic function-tail text remains a bounded fallback for IDs unresolved at standard detail.
 
 The caller must never infer packet membership from the requested number of IDs. After adapter extraction, the extension may further trim complete items to the preset `maxTokens` transport budget and recompute exact packet metadata. This is normal bounded pagination: callers must review the returned subset and continue with the remaining IDs rather than treating `requested > packetIds.length` as an error.
 

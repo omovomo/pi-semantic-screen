@@ -75,7 +75,7 @@ test("semantic review loop uses next and atomic commit, not model-owned state me
 });
 
 test("review contract keeps explicit dispositions and persisted-state defaulting rule", () => {
-  assert.match(skill, /`UI_ONLY`: display-only effect/i);
+  assert.match(skill, /`UI_ONLY`: rendering\/formatting\/display-only effect/i);
   assert.match(skill, /`EXPECTED_NORMALIZATION`: normalization explicitly allowed/i);
   assert.match(skill, /missing context is not enough/i);
   assert.match(skill, /returning an empty\/default domain object after an authoritative persisted-state read\/parse failure is not expected normalization/i);

@@ -53,6 +53,10 @@ A preset defines semantic policy:
 
 A preset does not implement traversal, parsing, evidence extraction, or review-state bookkeeping.
 
+## Value-directed expanded evidence
+
+The built-in Python adapter may enrich only `detail:"expanded"` packets with deterministic value-directed evidence. It traces concrete affected values through local reads/calls/returns and at most two exact call edges, treats direct fallback returns as synthetic affected values when one exact caller binding exists, suppresses false empty-container sentinels when the caught path can mutate them, and can connect exact policy/data constructors to evaluator guards with explicit bounded outcomes. Ambiguous bindings are not guessed and remain `unknown`. These extractors are evidence-only: they do not decide whether a fallback is safe or material. Review state and semantic disposition policy are unchanged.
+
 ## Adapters
 
 An adapter implements deterministic source integration:
