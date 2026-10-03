@@ -169,15 +169,15 @@ test("expanded python exception evidence includes targeted post-handler data-flo
   const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-dataflow-"));
   try {
     writeFileSync(
-      join(root, "policy.py"),
+      join(root, "flow.py"),
       [
         "def evaluate():",
-        "    rsi_data = {}",
+        "    metric_data = {}",
         "    try:",
-        "        rsi_data = load_rsi()",
+        "        metric_data = load_metric()",
         "    except Exception:",
         "        pass",
-        "    snapshot = build_snapshot(rsi_data)",
+        "    snapshot = build_snapshot(metric_data)",
         "    return snapshot",
         "",
       ].join("\n"),
@@ -194,9 +194,9 @@ test("expanded python exception evidence includes targeted post-handler data-flo
       detail: "expanded",
     });
     assert.equal(expanded.status, "ok");
-    assert.match(expanded.items[0].evidence, /dataflow: tracked=rsi_data/);
-    assert.match(expanded.items[0].evidence, /pre_try_writes=.*rsi_data.*= \{\}/s);
-    assert.match(expanded.items[0].evidence, /post_handler_reads=.*build_snapshot\(rsi_data\)/s);
+    assert.match(expanded.items[0].evidence, /dataflow: tracked=metric_data/);
+    assert.match(expanded.items[0].evidence, /pre_try_writes=.*metric_data.*= \{\}/s);
+    assert.match(expanded.items[0].evidence, /post_handler_reads=.*build_snapshot\(metric_data\)/s);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -206,7 +206,7 @@ test("expanded python exception evidence surfaces validation, core-call, persist
   const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-semantic-hints-"));
   try {
     writeFileSync(
-      join(root, "policy.py"),
+      join(root, "flow.py"),
       [
         "def evaluate():",
         "    state = {}",
@@ -413,15 +413,15 @@ test("expanded interprocedural evidence tracks subscript mutation into a returne
         "",
         "@dataclass",
         "class LoadResult:",
-        "    rsi_by_ticker: dict",
+        "    metric_by_key: dict",
         "",
-        "def fetch(ticker):",
-        "    rsi_data = {}",
+        "def fetch(key):",
+        "    metric_data = {}",
         "    try:",
-        "        rsi_data[ticker] = compute_rsi(ticker)",
+        "        metric_data[key] = compute_metric(key)",
         "    except Exception:",
         "        pass",
-        "    return LoadResult(rsi_by_ticker=rsi_data)",
+        "    return LoadResult(metric_by_key=metric_data)",
         "",
       ].join("\n"),
     );
@@ -435,8 +435,8 @@ test("expanded interprocedural evidence tracks subscript mutation into a returne
       detail: "expanded",
     });
     const evidence = expanded.items[0].evidence;
-    assert.match(evidence, /affected=rsi_data/);
-    assert.match(evidence, /returned_container_binding=rsi_data->LoadResult\.rsi_by_ticker/);
+    assert.match(evidence, /affected=metric_data/);
+    assert.match(evidence, /returned_container_binding=metric_data->LoadResult\.metric_by_key/);
     assert.match(evidence, /terminal=normal_return/);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -618,7 +618,7 @@ test("expanded interprocedural evidence surfaces handler raise as explicit failu
   }
 });
 
-test("expanded interprocedural evidence treats tracked mapping get as a local read and propagates through a constructed policy object", async () => {
+test("expanded interprocedural evidence treats tracked mapping get as a local read and propagates through a constructed result object", async () => {
   const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-container-read-"));
   try {
     writeFileSync(
@@ -635,20 +635,20 @@ test("expanded interprocedural evidence treats tracked mapping get as a local re
         "        return key",
         "",
         "@dataclass",
-        "class PolicyInput:",
-        "    rsi: object",
+        "class ResultEnvelope:",
+        "    value: object",
         "",
-        "def evaluate(policy_input):",
-        "    return policy_input",
+        "def evaluate(result_envelope):",
+        "    return result_envelope",
         "",
-        "def run(ticker):",
-        "    rsi_data = {}",
+        "def run(key):",
+        "    metric_data = {}",
         "    try:",
-        "        rsi_data[ticker] = load_rsi(ticker)",
+        "        metric_data[key] = load_metric(key)",
         "    except Exception:",
         "        pass",
-        "    policy_input = PolicyInput(rsi=rsi_data.get(ticker))",
-        "    return evaluate(policy_input)",
+        "    result_envelope = ResultEnvelope(value=metric_data.get(key))",
+        "    return evaluate(result_envelope)",
         "",
       ].join("\n"),
     );
@@ -662,8 +662,8 @@ test("expanded interprocedural evidence treats tracked mapping get as a local re
       detail: "expanded",
     });
     const evidence = expanded.items[0].evidence;
-    assert.match(evidence, /constructor=PolicyInput binding=rsi_data\.get\(ticker\)->PolicyInput\.rsi result->policy_input/);
-    assert.match(evidence, /edge1=run->evaluate binding=policy_input->policy_input/);
+    assert.match(evidence, /constructor=ResultEnvelope binding=metric_data\.get\(key\)->ResultEnvelope\.value result->result_envelope/);
+    assert.match(evidence, /edge1=run->evaluate binding=result_envelope->result_envelope/);
     assert.doesNotMatch(evidence, /ambiguous.*callee get/i);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -767,8 +767,8 @@ test("expanded evidence shows preserved pre-try sentinel and its fail-closed gua
         "    except Exception:",
         "        record_observation('bridge failed')",
         "    if evaluation is None:",
-        "        return fail_closed_snapshot()",
-        "    return normal_snapshot(evaluation)",
+        "        return fail_closed_result()",
+        "    return normal_result(evaluation)",
         "",
       ].join("\n"),
     );
@@ -785,7 +785,7 @@ test("expanded evidence shows preserved pre-try sentinel and its fail-closed gua
     assert.match(evidence, /sentinel_handling:/);
     assert.match(evidence, /evaluation=None source=pre_try@2/);
     assert.match(evidence, /guard@7:if evaluation is None:/);
-    assert.match(evidence, /return fail_closed_snapshot\(\)/);
+    assert.match(evidence, /return fail_closed_result\(\)/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -826,8 +826,8 @@ test("expanded evidence shows handler-assigned UNKNOWN sentinel and its explicit
   }
 });
 
-test("expanded policy terminal flow connects PolicyInput field to evaluator guard and outcome", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-policy-terminal-"));
+test("expanded structured terminal flow connects ResultEnvelope field to evaluator guard and outcome", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-structured-terminal-"));
   try {
     writeFileSync(
       join(root, "flow.py"),
@@ -835,21 +835,21 @@ test("expanded policy terminal flow connects PolicyInput field to evaluator guar
         "from dataclasses import dataclass",
         "",
         "@dataclass",
-        "class PolicyInput:",
-        "    allocation_state: object",
+        "class ResultEnvelope:",
+        "    parsed_state: object",
         "",
-        "def evaluate_policy(policy_input):",
-        "    if policy_input.allocation_state is None:",
-        "        return DecisionSnapshot('FAIL_CLOSED')",
-        "    return DecisionSnapshot('OK')",
+        "def evaluate_policy(result_envelope):",
+        "    if result_envelope.parsed_state is None:",
+        "        return OutcomeEnvelope('FAIL_CLOSED')",
+        "    return OutcomeEnvelope('OK')",
         "",
         "def run():",
         "    try:",
-        "        allocation_state = classify_allocation()",
+        "        parsed_state = parse_state()",
         "    except Exception:",
-        "        allocation_state = None",
-        "    policy_input = PolicyInput(allocation_state=allocation_state)",
-        "    return evaluate_policy(policy_input)",
+        "        parsed_state = None",
+        "    result_envelope = ResultEnvelope(parsed_state=parsed_state)",
+        "    return evaluate_policy(result_envelope)",
         "",
       ].join("\n"),
     );
@@ -863,11 +863,11 @@ test("expanded policy terminal flow connects PolicyInput field to evaluator guar
       detail: "expanded",
     });
     const evidence = expanded.items[0].evidence;
-    assert.match(evidence, /policy_terminal_flow:/);
-    assert.match(evidence, /constructor=PolicyInput binding=allocation_state->PolicyInput\.allocation_state result->policy_input/);
-    assert.match(evidence, /call=run->evaluate_policy binding=policy_input->policy_input/);
-    assert.match(evidence, /if policy_input\.allocation_state is None:/);
-    assert.match(evidence, /outcome=return@9:return DecisionSnapshot\('FAIL_CLOSED'\)/);
+    assert.match(evidence, /structured_terminal_flow:/);
+    assert.match(evidence, /constructor=ResultEnvelope binding=parsed_state->ResultEnvelope\.parsed_state result->result_envelope/);
+    assert.match(evidence, /call=run->evaluate_policy binding=result_envelope->result_envelope/);
+    assert.match(evidence, /if result_envelope\.parsed_state is None:/);
+    assert.match(evidence, /outcome=return@9:return OutcomeEnvelope\('FAIL_CLOSED'\)/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -909,8 +909,8 @@ test("expanded sentinel evidence uses the nearest preserved pre-try sentinel", a
   }
 });
 
-test("expanded policy flow follows handler return None through caller binding into PolicyInput evaluator", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-return-policy-none-"));
+test("expanded structured flow follows handler return None through caller binding into ResultEnvelope evaluator", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-return-structured-none-"));
   try {
     writeFileSync(
       join(root, "flow.py"),
@@ -918,28 +918,28 @@ test("expanded policy flow follows handler return None through caller binding in
         "from dataclasses import dataclass",
         "",
         "@dataclass",
-        "class PolicyInput:",
-        "    allocation_state: object",
+        "class ResultEnvelope:",
+        "    parsed_state: object",
         "",
         "@dataclass",
-        "class DecisionSnapshot:",
+        "class OutcomeEnvelope:",
         "    availability: str",
         "",
-        "def classify_allocation():",
+        "def parse_state():",
         "    try:",
         "        return risky_classify()",
         "    except Exception:",
         "        return None",
         "",
-        "def evaluate_policy(policy_input):",
-        "    if policy_input.allocation_state is None:",
-        "        return DecisionSnapshot('FAIL_CLOSED')",
-        "    return DecisionSnapshot('OK')",
+        "def evaluate_policy(result_envelope):",
+        "    if result_envelope.parsed_state is None:",
+        "        return OutcomeEnvelope('FAIL_CLOSED')",
+        "    return OutcomeEnvelope('OK')",
         "",
         "def run():",
-        "    allocation_state = classify_allocation()",
-        "    policy_input = PolicyInput(allocation_state=allocation_state)",
-        "    return evaluate_policy(policy_input)",
+        "    parsed_state = parse_state()",
+        "    result_envelope = ResultEnvelope(parsed_state=parsed_state)",
+        "    return evaluate_policy(result_envelope)",
         "",
       ].join("\n"),
     );
@@ -954,19 +954,19 @@ test("expanded policy flow follows handler return None through caller binding in
     });
     const evidence = expanded.items[0].evidence;
     assert.match(evidence, /sentinel_handling:.*return=None source=handler@15/);
-    assert.match(evidence, /caller_binding=return->allocation_state/);
-    assert.match(evidence, /policy_terminal_flow:.*fallback_return=None/);
-    assert.match(evidence, /constructor=PolicyInput binding=allocation_state->PolicyInput\.allocation_state result->policy_input/);
-    assert.match(evidence, /call=run->evaluate_policy binding=policy_input->policy_input/);
-    assert.match(evidence, /if policy_input\.allocation_state is None:/);
-    assert.match(evidence, /outcome=return@19:return DecisionSnapshot\('FAIL_CLOSED'\)/);
+    assert.match(evidence, /caller_binding=return->parsed_state/);
+    assert.match(evidence, /structured_terminal_flow:.*fallback_return=None/);
+    assert.match(evidence, /constructor=ResultEnvelope binding=parsed_state->ResultEnvelope\.parsed_state result->result_envelope/);
+    assert.match(evidence, /call=run->evaluate_policy binding=result_envelope->result_envelope/);
+    assert.match(evidence, /if result_envelope\.parsed_state is None:/);
+    assert.match(evidence, /outcome=return@19:return OutcomeEnvelope\('FAIL_CLOSED'\)/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("expanded policy flow follows handler return UNKNOWN through caller binding without name heuristics", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-return-policy-unknown-"));
+test("expanded structured flow follows handler return UNKNOWN through caller binding without name heuristics", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-return-structured-unknown-"));
   try {
     writeFileSync(
       join(root, "flow.py"),
@@ -977,7 +977,7 @@ test("expanded policy flow follows handler return UNKNOWN through caller binding
         "    UNKNOWN = 'UNKNOWN'",
         "",
         "@dataclass",
-        "class PolicyInput:",
+        "class ResultEnvelope:",
         "    valuation_state: object",
         "",
         "def classify_value():",
@@ -993,8 +993,8 @@ test("expanded policy flow follows handler return UNKNOWN through caller binding
         "",
         "def run():",
         "    valuation_state = classify_value()",
-        "    policy_input = PolicyInput(valuation_state=valuation_state)",
-        "    return decide(policy_input)",
+        "    result_envelope = ResultEnvelope(valuation_state=valuation_state)",
+        "    return decide(result_envelope)",
         "",
       ].join("\n"),
     );
@@ -1009,8 +1009,8 @@ test("expanded policy flow follows handler return UNKNOWN through caller binding
     });
     const evidence = expanded.items[0].evidence;
     assert.match(evidence, /fallback_return=ValuationState\.UNKNOWN/);
-    assert.match(evidence, /constructor=PolicyInput binding=valuation_state->PolicyInput\.valuation_state result->policy_input/);
-    assert.match(evidence, /call=run->decide binding=policy_input->x/);
+    assert.match(evidence, /constructor=ResultEnvelope binding=valuation_state->ResultEnvelope\.valuation_state result->result_envelope/);
+    assert.match(evidence, /call=run->decide binding=result_envelope->x/);
     assert.match(evidence, /if x\.valuation_state is ValuationState\.UNKNOWN:/);
     assert.match(evidence, /outcome=return@18:return 'UNAVAILABLE'/);
   } finally {

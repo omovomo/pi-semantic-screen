@@ -25,13 +25,13 @@ test("0.6.1 fan-out preserves exact consumer shapes even when the consumer guard
   const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-consumer-shapes-"));
   try {
     writeFileSync(join(root, "flow.py"), [
-      "from dataclasses import dataclass", "", "@dataclass", "class PolicyInput:", "    allocation_state: object", "",
-      "def classify_allocation():", "    try:", "        return risky()", "    except Exception:", "        return None", "",
-      "def build_input():", "    allocation_state = classify_allocation()", "    return PolicyInput(allocation_state=allocation_state)", "",
-      "def evaluate_final_policy(policy_input):", "    return project_decision(policy_input)", "",
-      "def project_decision(policy_input):", "    return 'UNKNOWN'", "",
-      "def run_a():", "    policy_input = build_input()", "    return evaluate_final_policy(policy_input)", "",
-      "def run_b():", "    policy_input = build_input()", "    return evaluate_final_policy(policy_input)", "",
+      "from dataclasses import dataclass", "", "@dataclass", "class ResultEnvelope:", "    parsed_state: object", "",
+      "def parse_state():", "    try:", "        return risky()", "    except Exception:", "        return None", "",
+      "def build_input():", "    parsed_state = parse_state()", "    return ResultEnvelope(parsed_state=parsed_state)", "",
+      "def evaluate_final_policy(result_envelope):", "    return project_decision(result_envelope)", "",
+      "def project_decision(result_envelope):", "    return 'UNKNOWN'", "",
+      "def run_a():", "    result_envelope = build_input()", "    return evaluate_final_policy(result_envelope)", "",
+      "def run_b():", "    result_envelope = build_input()", "    return evaluate_final_policy(result_envelope)", "",
     ].join("\n"));
     const evidence = await expandedForFirst(root);
     assert.match(evidence, /return_fanout=2 resolved=2 unresolved=0/);
@@ -45,17 +45,17 @@ test("0.6.1 resolves direct returned-object consumers used as evaluator argument
   const root = mkdtempSync(join(tmpdir(), "pi-semantic-screen-direct-consumer-"));
   try {
     writeFileSync(join(root, "flow.py"), [
-      "from dataclasses import dataclass", "", "@dataclass", "class PolicyInput:", "    state: object", "",
+      "from dataclasses import dataclass", "", "@dataclass", "class ResultEnvelope:", "    state: object", "",
       "def parse_state():", "    try:", "        return risky()", "    except Exception:", "        return None", "",
-      "def build_input():", "    state = parse_state()", "    return PolicyInput(state=state)", "",
-      "def evaluate(policy_input):", "    if policy_input.state is None:", "        return 'FAIL_CLOSED'", "    return 'OK'", "",
+      "def build_input():", "    state = parse_state()", "    return ResultEnvelope(state=state)", "",
+      "def evaluate(result_envelope):", "    if result_envelope.state is None:", "        return 'FAIL_CLOSED'", "    return 'OK'", "",
       "def run_a():", "    return evaluate(build_input())", "",
       "def run_b():", "    return evaluate(build_input())", "",
     ].join("\n"));
     const evidence = await expandedForFirst(root);
     assert.match(evidence, /return_fanout=2 resolved=2 unresolved=0/);
-    assert.match(evidence, /direct_consumer=run_a->evaluate binding=return->policy_input/);
-    assert.match(evidence, /direct_consumer=run_b->evaluate binding=return->policy_input/);
+    assert.match(evidence, /direct_consumer=run_a->evaluate binding=return->result_envelope/);
+    assert.match(evidence, /direct_consumer=run_b->evaluate binding=return->result_envelope/);
     assert.match(evidence, /FAIL_CLOSED/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

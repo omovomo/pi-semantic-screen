@@ -44,7 +44,7 @@ The suite includes:
 After unit checks, load the package in Pi and run:
 
 ```text
-/screen-exceptions garp_cli/
+/screen-exceptions my_project/
 ```
 
 Approve the classifier batch when requested, then use:
@@ -78,7 +78,7 @@ Also verify:
 - no model-supplied preset question/criteria/threshold, retained IDs, or manual `reviewedIds`/blocked/expanded queue mutations in Code Mode;
 - no stale/empty-ID fetches;
 - primary counts/workflow ID come from `screen_primary_start` (or `screen_refinement_start`), and exact terminal review progress comes from `screen_review_commit`/`screen_review_next`;
-- `tlh_portfolio.py:761`, malformed Flex lot/transaction cases, and `rebalance.py:2329` receive evidence/dispositions consistent with the preset contract.
+- representative explicit-failure, authoritative-record omission, fallback/default, UI-only, and ambiguous-dataflow cases receive evidence/dispositions consistent with the preset contract.
 
 ## Full development environment
 

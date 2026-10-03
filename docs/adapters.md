@@ -40,7 +40,7 @@ Return:
 - `items`: evidence records in the same order;
 - `sourceCount` and `chars`;
 - `status:"error"` on stale/unresolvable targets or source failures;
-- expanded detail adds targeted data-flow hints (`tracked`, `pre_try_writes`, `post_handler_reads`), post-handler validation/control hints, core calls using tracked values, persistence/save calls, exact sentinel/default handling (including direct fallback-return origins and mutable-container suppression), bounded exact caller/constructor/evaluator terminal guards, value-directed interprocedural flow, and wider bounded caller context; generic function-tail text remains a bounded fallback for IDs unresolved at standard detail.
+- expanded detail adds targeted data-flow hints (`tracked`, `pre_try_writes`, `post_handler_reads`), post-handler validation/control hints, core calls using tracked values, persistence/save calls, exact sentinel/default handling (including direct fallback-return origins and mutable-container suppression), bounded exact caller/constructor/downstream-consumer terminal guards, value-directed interprocedural flow, and wider bounded caller context; generic function-tail text remains a bounded fallback for IDs unresolved at standard detail.
 
 The caller must never infer packet membership from the requested number of IDs. After adapter extraction, the extension may further trim complete items to the preset `maxTokens` transport budget and recompute exact packet metadata. This is normal bounded pagination: callers must review the returned subset and continue with the remaining IDs rather than treating `requested > packetIds.length` as an error.
 
@@ -91,3 +91,22 @@ The adapter forces UTF-8 I/O and uses JSON over stdin/stdout. No shell is requir
 - No hidden fuzzy matching that can silently change candidate identity.
 - Fail closed on missing source, parser failures, or stale IDs.
 - Keep rich source payloads bounded and avoid duplicating source context inside one evidence item.
+
+## Built-in Python adapter freeze boundary
+
+The built-in `python-exceptions` adapter is feature-frozen after 0.6.3 except for correctness, compatibility, boundedness, and parser/runtime fixes.
+
+Its responsibility is structural Python evidence only:
+
+- `try`/`except` discovery and stable handler identity;
+- assignments, mutations, control transfer, returns, raises, and loop omission;
+- exact local/caller/callee argument bindings;
+- structured-result constructor/field propagation;
+- sentinel/default origin and explicit consumers;
+- bounded returned-object fan-out;
+- persistence/core-call sinks and handler exit topology;
+- fail-closed ambiguity (`unknown` / insufficient evidence) rather than domain inference.
+
+Do not add application vocabulary or semantic rules for a particular project, product, data model, business domain, function/class name, enum value, or provider. If a proposed rule needs terms from the audited application to describe why it is valid, keep that interpretation in the preset/reviewer layer or use the application only as an external regression corpus.
+
+New capabilities should normally be proven by a second adapter or by a generic adapter/core abstraction rather than by deepening `python-exceptions` for one codebase.

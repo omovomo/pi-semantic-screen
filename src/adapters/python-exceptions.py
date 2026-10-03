@@ -184,7 +184,7 @@ def assigned_keys(nodes: list[ast.AST]) -> set[str]:
     mutators = {"append", "extend", "update", "add", "discard", "remove", "pop", "clear", "setdefault"}
 
     def add_target(target: ast.AST) -> None:
-        # Subscript assignments such as `rsi_data[ticker] = value` mutate the base mapping.
+        # Subscript assignments such as `results[key] = value` mutate the base mapping.
         # This is crucial for omission-style handlers where the outward effect is an incomplete
         # collection rather than a reassigned local scalar.
         if isinstance(target, ast.Subscript):
@@ -722,7 +722,7 @@ def branch_outcome_evidence(lines: list[str], branch: ast.AST) -> str:
                 return f"raise@{getattr(node, 'lineno', 0)}:{node_source(lines, node, 220)}"
             if isinstance(node, ast.Return):
                 return f"return@{getattr(node, 'lineno', 0)}:{node_source(lines, node, 300)}"
-    # A state/snapshot assignment can be the terminal policy effect even without an early return.
+    # A state/result assignment can be a terminal outward effect even without an early return.
     for stmt in body:
         if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.NamedExpr)):
             return f"state@{getattr(stmt, 'lineno', 0)}:{node_source(lines, stmt, 300)}"
@@ -835,7 +835,7 @@ def follow_exact_function_return(
     if not binding:
         return "<none>"
     note = f"{origin_note}; returned_to={caller_fn.name}.{binding} at {caller_path}:{getattr(call, 'lineno', 0)}"
-    return policy_terminal_from_context(
+    return structured_terminal_from_context(
         lines=caller_lines,
         path_name=caller_path,
         function_node=caller_fn,
@@ -877,7 +877,7 @@ def follow_bounded_function_return_fanout(
         binding = assignment_binding_for_call(call, caller_parents)
         if binding:
             note = f"returned_to={caller_fn.name}.{binding} at {caller_path}:{getattr(call, 'lineno', 0)}"
-            flow = policy_terminal_from_context(
+            flow = structured_terminal_from_context(
                 lines=caller_lines,
                 path_name=caller_path,
                 function_node=caller_fn,
@@ -918,7 +918,7 @@ def follow_bounded_function_return_fanout(
                 f"binding=return->{ctor_name}.{field}"
             )
             if result_binding:
-                flow = policy_terminal_from_context(
+                flow = structured_terminal_from_context(
                     lines=caller_lines,
                     path_name=caller_path,
                     function_node=caller_fn,
@@ -998,7 +998,7 @@ def follow_bounded_function_return_fanout(
     )
 
 
-def policy_terminal_from_context(
+def structured_terminal_from_context(
     *,
     lines: list[str],
     path_name: str,
@@ -1049,8 +1049,8 @@ def policy_terminal_from_context(
                 if followed != "<none>":
                     return followed
 
-    # Policy terminal evidence is intentionally stricter than generic interprocedural flow:
-    # require an exact project constructor field before accepting a guard as decision evidence.
+    # Structured terminal evidence is intentionally stricter than generic interprocedural flow:
+    # require an exact project constructor field before accepting a guard as terminal structured-result evidence.
     if not constructor_proven:
         return "<none>"
 
@@ -1090,7 +1090,7 @@ def policy_terminal_from_context(
     )
 
 
-def policy_terminal_evidence(
+def structured_terminal_evidence(
     *,
     lines: list[str],
     path_name: str,
@@ -1106,7 +1106,7 @@ def policy_terminal_evidence(
 
     Direct handler fallback returns are treated as synthetic affected values,
     because many real helpers encode failure as ``return None``/``return UNKNOWN`` and only
-    become decision-relevant in their caller. No policy verdict is inferred from names.
+    become outward-result-relevant in their caller. No domain verdict is inferred from names.
     """
     if try_node is None or not isinstance(function_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         return "<none>"
@@ -1118,7 +1118,7 @@ def policy_terminal_evidence(
     if not tracked:
         tracked = set(assigned_keys(list(handler.body)))
     if tracked:
-        local = policy_terminal_from_context(
+        local = structured_terminal_from_context(
             lines=lines,
             path_name=path_name,
             function_node=function_node,
@@ -1154,7 +1154,7 @@ def policy_terminal_evidence(
             f"fallback_return={sentinel} source={path_name}:{getattr(ret, 'lineno', 0)}; "
             f"caller_binding=return->{binding} at {caller_path}:{getattr(call, 'lineno', 0)}"
         )
-        return policy_terminal_from_context(
+        return structured_terminal_from_context(
             lines=caller_lines,
             path_name=caller_path,
             function_node=caller_fn,
@@ -1167,7 +1167,7 @@ def policy_terminal_evidence(
             origin_note=origin,
         )
 
-    # Inline constructor binding: ``return PolicyInput(field=helper())``. The helper result
+    # Inline constructor binding: ``return ResultEnvelope(field=helper())``. The helper result
     # has no local variable, but the constructor keyword provides an exact structural binding.
     inline = direct_constructor_context_for_call(call, class_index, caller_parents)
     if inline is None:
@@ -1178,7 +1178,7 @@ def policy_terminal_evidence(
         f"inline_constructor={ctor_name} binding=return->{ctor_name}.{field} at {caller_path}:{getattr(ctor_call, 'lineno', 0)}"
     )
     if result_binding:
-        return policy_terminal_from_context(
+        return structured_terminal_from_context(
             lines=caller_lines,
             path_name=caller_path,
             function_node=caller_fn,
@@ -1562,7 +1562,7 @@ def matching_argument_bindings(
 
 CONTAINER_READ_METHODS = {"get", "items", "keys", "values", "copy"}
 LOW_VALUE_CALL_WORDS = ("log", "debug", "trace", "print", "render", "display", "notify", "message", "label", "chart")
-HIGH_VALUE_CALL_WORDS = ("save", "persist", "commit", "flush", "serialize", "export", "sync", "upsert", "policy", "evaluate", "decision", "recalc", "calculate", "compute", "apply")
+CORE_FLOW_CALL_WORDS = ("save", "persist", "commit", "flush", "serialize", "export", "sync", "upsert", "evaluate", "validate", "resolve", "process", "execute", "recalc", "calculate", "compute", "apply")
 
 
 def is_container_read_call(call: ast.Call, tracked: set[str]) -> bool:
@@ -1625,12 +1625,12 @@ def first_relevant_flow_events(
 def call_priority(call: ast.Call, parents: dict[int, ast.AST] | None) -> int:
     """Rank propagation calls without using the rank as a semantic verdict.
 
-    Persistence/policy/core-looking calls are inspected before logging/UI calls. The exact
+    Persistence/core-processing calls are inspected before logging/UI calls. The exact
     snippet remains evidence; ranking alone never establishes safety or a finding.
     """
     name = (call_name(call) or "").lower()
     score = 50
-    if any(word in name for word in HIGH_VALUE_CALL_WORDS):
+    if any(word in name for word in CORE_FLOW_CALL_WORDS):
         score += 60
     if any(word in name for word in LOW_VALUE_CALL_WORDS):
         score -= 80
@@ -1647,7 +1647,7 @@ def call_priority(call: ast.Call, parents: dict[int, ast.AST] | None) -> int:
 
 def terminal_kind_for_call(call: ast.Call) -> str:
     # A call that consumes the tracked value is a concrete outward use. Do not infer
-    # policy/persistence semantics from naming alone; the reviewer gets the exact snippet.
+    # domain/persistence semantics from naming alone; the reviewer gets the exact snippet.
     return "core_call"
 
 
@@ -1727,7 +1727,7 @@ def exact_call_candidate(
     function_index: dict[str, list[tuple[str, list[str], ast.AST, dict[int, ast.AST]]]],
     parents: dict[int, ast.AST] | None = None,
 ) -> tuple[ast.Call, str, str, tuple[str, list[str], ast.AST, dict[int, ast.AST]], list[tuple[str, str]]] | None:
-    """Select the highest-value exact tracked call, de-prioritizing logging/UI calls."""
+    """Select the highest-value exact tracked call, de-prioritizing logging/UI calls without domain-specific names."""
     candidates: list[tuple[int, int, ast.Call, str, str, tuple[str, list[str], ast.AST, dict[int, ast.AST]], list[tuple[str, str]]]] = []
     for kind, node, snippet in events:
         if kind != "call" or not isinstance(node, ast.Call):
@@ -1899,10 +1899,10 @@ def interprocedural_evidence(
                 terminal_evidence = f"returned_container_binding={binding}; {snippet}"
                 break
 
-    # A local constructor can carry an affected value into a policy/result/data object. When
+    # A local constructor can carry an affected value into a structured result/data object. When
     # the constructed object is assigned, continue from that exact result variable without
-    # consuming an interprocedural edge. This exposes e.g. mapping.get(...) -> PolicyInput.rsi
-    # -> policy_input -> evaluate(policy_input).
+    # consuming an interprocedural edge. This exposes e.g. mapping.get(...) -> ResultEnvelope.value
+    # -> result -> process(result).
     flow_events = events
     flow_tracked = tracked
     constructor_note = ""
@@ -1923,7 +1923,7 @@ def interprocedural_evidence(
                 terminal_evidence = f"{constructor_note}; {ctor_snippet}"
 
     # Prefer the highest-value exact call consuming the current propagated value. Logging/UI
-    # calls remain local evidence but lose to persistence/policy/core propagation.
+    # calls remain local evidence but lose to persistence/core propagation.
     exact_local = exact_call_candidate(flow_events, flow_tracked, function_index, parents) if terminal == "unknown" else None
     if exact_local is not None:
         call, snippet, name, definition, bindings = exact_local
@@ -2279,7 +2279,7 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
         semantic_hints = ""
         interprocedural = ""
         sentinel_handling = ""
-        policy_terminal = ""
+        structured_terminal = ""
         handler_flow = ""
         if detail == "expanded":
             handler_flow = handler_control_flow_evidence(
@@ -2301,7 +2301,7 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
                 function_index=function_index,
                 call_sites=call_sites,
             )
-            policy_terminal = policy_terminal_evidence(
+            structured_terminal = structured_terminal_evidence(
                 lines=lines,
                 path_name=path_name,
                 handler=handler,
@@ -2334,7 +2334,7 @@ def evidence(scope: str, ids: list[str], max_items: int, max_sources: int, max_c
             f"context: {context}\n"
             f"callers: {' | '.join(callers) if callers else '<none found>'}"
             + (
-                f"\ndataflow: {dataflow}\nsemantic_hints: {semantic_hints}\nsentinel_handling: {sentinel_handling}\npolicy_terminal_flow: {policy_terminal}\ninterprocedural_flow: {interprocedural}\nhandler_control_flow: {handler_flow}\nexpanded_function_tail: {expanded_tail}"
+                f"\ndataflow: {dataflow}\nsemantic_hints: {semantic_hints}\nsentinel_handling: {sentinel_handling}\nstructured_terminal_flow: {structured_terminal}\ninterprocedural_flow: {interprocedural}\nhandler_control_flow: {handler_flow}\nexpanded_function_tail: {expanded_tail}"
                 if detail == "expanded" else ""
             )
         )

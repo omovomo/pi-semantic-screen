@@ -31,5 +31,5 @@ test("review contract stays compact while retaining fail-closed semantic rules",
   assert.match(contract.rejectWhen, /authoritative-record skip/i);
   assert.match(contract.rejectWhen, /Missing context is INSUFFICIENT_EVIDENCE/i);
   assert.match(contract.rejectWhen, /not INSUFFICIENT merely because separate reporting is unshown/i);
-  assert.match(contract.dispositions.find((entry) => entry.id === "UI_ONLY")?.description ?? "", /persisted state, policy, screening, or execution/i);
+  assert.match(contract.dispositions.find((entry) => entry.id === "UI_ONLY")?.description ?? "", /persisted state, validation, business\/control flow, or execution/i);
 });

@@ -104,7 +104,7 @@ test("primary manager classifies with preset contract and starts review from exa
   const manager = new PresetScreeningWorkflowManager();
   const d = deps(() => result());
   const started = await manager.startPrimary(
-    { preset, scope: "garp_cli/", confirm: true },
+    { preset, scope: "my_project/", confirm: true },
     d.value,
   );
   assert.equal(started.status, "ok");
@@ -130,12 +130,12 @@ test("approval-required primary never starts review or becomes canonical", async
       errors: [], projectedCalls: 3, callLimit: 2,
     });
   });
-  const first = await manager.startPrimary({ preset, scope: "garp_cli/", confirm: false }, d.value);
+  const first = await manager.startPrimary({ preset, scope: "my_project/", confirm: false }, d.value);
   assert.equal(first.status, "approval_required");
   assert.equal(first.reviewStarted, false);
   assert.equal(first.primaryRunId, undefined);
   assert.deepEqual(d.reviewTargets, []);
-  const second = await manager.startPrimary({ preset, scope: "garp_cli/", confirm: true }, d.value);
+  const second = await manager.startPrimary({ preset, scope: "my_project/", confirm: true }, d.value);
   assert.equal(second.status, "approval_required");
   assert.equal(calls, 2, "failed/approval-required primary must not become canonical state");
 });
@@ -147,8 +147,8 @@ test("first successful primary initialization is reused without rediscovery or r
   const d = deps(() => { screens += 1; return result(); });
   const originalDiscover = d.value.discoverCandidates;
   d.value.discoverCandidates = async (request) => { discovers += 1; return originalDiscover(request); };
-  const first = await manager.startPrimary({ preset, scope: "garp_cli/", confirm: true }, d.value);
-  const second = await manager.startPrimary({ preset, scope: "garp_cli/", confirm: true }, d.value);
+  const first = await manager.startPrimary({ preset, scope: "my_project/", confirm: true }, d.value);
+  const second = await manager.startPrimary({ preset, scope: "my_project/", confirm: true }, d.value);
   assert.equal(first.status, "ok");
   assert.equal(second.status, "ok");
   assert.equal(second.reusedInitialization, true);
@@ -171,7 +171,7 @@ test("deferred primary keeps retained candidates extension-owned for exact prese
     };
   });
   const primary = await manager.startPrimary(
-    { preset, scope: "garp_cli/", confirm: true, deferReview: true },
+    { preset, scope: "my_project/", confirm: true, deferReview: true },
     d.value,
   );
   assert.equal(primary.status, "ok");

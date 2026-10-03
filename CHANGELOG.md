@@ -1,3 +1,11 @@
+## 0.6.3
+
+- Freeze the built-in `python-exceptions` adapter after a de-specialization pass; no new evidence capability is added.
+- Rename `policy_terminal_flow` to `structured_terminal_flow` and corresponding internal helpers to describe the structural behavior rather than one application domain.
+- Remove project/domain vocabulary from Python call ranking (`policy`, `decision`) and use generic processing/persistence verbs instead.
+- Remove finance-specific wording from the Python preset and GARP-specific paths/cases from package documentation; synthetic tests now use generic structured-result fixtures.
+- Preserve extension-owned primary/review workflow, fail-closed ambiguity handling, bounded fan-out, handler control-flow, and packet budgets unchanged.
+
 # Changelog
 
 ## 0.6.2 - 2026-10-03
@@ -20,16 +28,16 @@
 - Add extension-owned optional refinement with `screen_refinement_start`: `deferReview:true` stores primary retained candidates behind an opaque `primaryRunId`; refinement applies the exact preset refinement contract with its own call guard and starts review from refined retained IDs.
 - Keep `screen_batch` and `screen_review_start` as low-level/ad-hoc compatibility APIs; canonical preset prompts no longer pass candidate arrays, semantic contracts, or `reviewTargetIds` through model context.
 - Strengthen Python authoritative-record semantics: once evidence proves a malformed authoritative record is skipped from a normally returned authoritative collection, review should confirm unless that exact omission is positively shown permitted/surfaced; absence of separate reporting evidence alone is not insufficiency.
-- Add bounded returned-object fan-out evidence for small exact caller sets. `policy_terminal_flow` reports `resolved/unresolved` consumer counts instead of arbitrarily selecting one caller; fan-out above eight sites remains explicitly unresolved.
+- Add bounded returned-object fan-out evidence for small exact caller sets. `structured_terminal_flow` reports `resolved/unresolved` consumer counts instead of arbitrarily selecting one caller; fan-out above eight sites remains explicitly unresolved.
 - Preserve review dispositions, review state machine, blocked quarantine, the generic two-call-edge bound, and the 7200-token packet budget.
-- Add regressions for extension-owned primary/refinement contracts, canonical initialization reuse, guarded refinement, returned `PolicyInput` fan-out, partial fan-out accounting, inline constructor fan-out, and large-fan-out bounding.
+- Add regressions for extension-owned primary/refinement contracts, canonical initialization reuse, guarded refinement, returned structured-object fan-out, partial fan-out accounting, inline constructor fan-out, and large-fan-out bounding.
 
 ## 0.5.9 - 2026-10-03
 
 - Follow exact fallback-return bindings through constructors returned directly from builder functions, then resume bounded tracing from the builder result in its immediate caller.
-- Bind inline helper fallbacks used directly as constructor keyword values (for example `PolicyInput(field=helper())`) without inventing an intermediate local variable; only exact direct keyword values qualify.
+- Bind inline helper fallbacks used directly as constructor keyword values (for example `ResultEnvelope(field=helper())`) without inventing an intermediate local variable; only exact direct keyword values qualify.
 - Add one terminal-result continuation after an already-proven evaluator guard outcome so a concrete returned state can be connected to its immediate caller-visible return/container sink without adding a third generic call edge.
-- Tighten `policy_terminal_flow`: an exact project constructor-field binding is now required before a downstream guard/outcome is accepted as policy-terminal evidence, reducing incidental snapshot/policy branch matches.
+- Tighten `structured_terminal_flow`: an exact project constructor-field binding is now required before a downstream guard/outcome is accepted as structured-terminal evidence, reducing incidental snapshot/policy branch matches.
 - Keep state ownership, primary threshold, disposition vocabulary, two generic call-edge bound, blocked quarantine, and 7200-token transport budget unchanged.
 - Add regressions for direct-return constructors, inline constructor helpers, and evaluator-result propagation into a returned snapshot.
 
@@ -38,14 +46,14 @@
 - Treat direct handler `return None` / `return UNKNOWN`-style fallbacks as synthetic affected values in expanded evidence and, when there is exactly one function definition and one caller site, surface the exact `return -> caller variable` binding.
 - Continue those exact fallback-return bindings through project data/policy constructors and into exact callee guards with explicit bounded `return`/`raise`/state outcomes; remove policy/snapshot name matching as a prerequisite so evidence is structural rather than keyword-driven.
 - Tighten `sentinel_handling`: do not report a pre-try empty list/mapping/set as the resulting sentinel when the handler mutates that container or the try body may have partially populated it before failure.
-- Reject structural branch matches as `policy_terminal_flow` unless the exact bound parameter reaches a guard/validation with an explicit bounded outcome, reducing snapshot/fingerprint false positives.
+- Reject structural branch matches as `structured_terminal_flow` unless the exact bound parameter reaches a guard/validation with an explicit bounded outcome, reducing snapshot/fingerprint false positives.
 - Keep review state, primary threshold, disposition vocabulary, two-edge bound, blocked quarantine, and 7200-token packet budget unchanged.
-- Add regressions for `return None -> caller -> PolicyInput -> evaluator`, `return UNKNOWN`, handler-mutated empty lists, partially populated mappings, and false-positive snapshot branches.
+- Add regressions for `return None -> caller -> structured result -> consumer`, `return UNKNOWN`, handler-mutated empty lists, partially populated mappings, and false-positive structural branches.
 
 ## 0.5.7 - 2026-10-03
 
 - Add `sentinel_handling` to expanded Python evidence: detect structurally obvious handler/pre-try `None`, `UNKNOWN`/missing-style strings, empty containers, and NaN-style sentinels, then show their first bounded guard and outward consumer without inferring safety.
-- Add `policy_terminal_flow`: connect exact affected-value constructor bindings to policy/evaluator calls, surface the first exact callee guard/validation over the bound parameter, and include a bounded explicit branch outcome.
+- Add `structured_terminal_flow`: connect exact affected-value constructor bindings to downstream consumer calls, surface the first exact callee guard/validation over the bound parameter, and include a bounded explicit branch outcome.
 - Preserve fail-closed semantics: handler-assigned sentinels outrank preserved pre-try values, the nearest prior sentinel is used, ambiguous bindings remain unresolved, and the new evidence never assigns review dispositions.
 - Keep the 0.5.x review state machine, primary threshold, disposition vocabulary, two-call-edge interprocedural bound, and 7200-token packet budget unchanged.
 - Add regressions for preserved pre-try fail-closed sentinels, handler-assigned `UNKNOWN`, policy-input-to-evaluator terminal guards, and nearest-sentinel selection.

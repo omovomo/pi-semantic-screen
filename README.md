@@ -2,7 +2,7 @@
 
 Adapter-driven semantic screening for Pi: cheaply classify many candidates, then perform bounded deep review over deterministic evidence.
 
-Version **0.6.2** keeps the extension-owned preset screening architecture from 0.6.0 and improves expanded Python evidence. It also fixes expanded evidence for module/class-level exception handlers by initializing and emitting `handler_control_flow` independently of function-level data-flow analysis. Small exact returned-object fan-out now preserves consumer shapes even when decision logic is delegated, direct forms such as `evaluate(build_input())` are resolved structurally, and `handler_control_flow` summarizes complete handler branch/exit topology plus the common fallthrough target. Review dispositions, canonical primary ownership, the two generic call-edge bound, and the 7200-token packet budget remain unchanged.
+Version **0.6.3** freezes the built-in Python exception adapter after a de-specialization pass. The adapter remains Python-specific but project/domain-agnostic: structured-result propagation, sentinel handling, bounded fan-out, handler exit topology, persistence sinks, and interprocedural bindings are inferred structurally rather than from application vocabulary. Extension-owned preset screening/review state, the two generic call-edge bound, and the 7200-token packet budget remain unchanged.
 
 ## Architecture at a glance
 
@@ -64,7 +64,7 @@ pi -e ./pi-semantic-screen
 GitHub tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.6.2
+pi install git:github.com/<owner>/pi-semantic-screen@v0.6.3
 ```
 
 See [Git installation and repository setup](docs/git-install.md).
@@ -74,19 +74,19 @@ See [Git installation and repository setup](docs/git-install.md).
 Built-in Python exception audit:
 
 ```text
-/screen-exceptions garp_cli/
+/screen-exceptions my_project/
 ```
 
 Equivalent generic command:
 
 ```text
-/screen-use python-exceptions garp_cli/
+/screen-use python-exceptions my_project/
 ```
 
 Optional explicit refinement:
 
 ```text
-/screen-use python-exceptions garp_cli/ --refine
+/screen-use python-exceptions my_project/ --refine
 ```
 
 For guarded batches above the configured call limit, `/screen-use` stops at preflight for explicit approval. After approval `screen_primary_start` runs the exact preset-owned primary contract with `confirm:true`; the model never reconstructs classifier semantics or retained IDs. If primary screening is non-`ok`, review is not started.
@@ -112,7 +112,7 @@ Deterministic adapter discovery:
 ```ts
 await tools.screen_discover({
   preset: "python-exceptions",
-  scope: "garp_cli/",
+  scope: "my_project/",
   mode: "count" // or "candidates"
 });
 ```
@@ -170,7 +170,7 @@ Low-level compatibility API. Canonical preset flows do not call it directly; `sc
 ```ts
 await tools.screen_review_start({
   preset: "python-exceptions",
-  scope: "garp_cli/",
+  scope: "my_project/",
   reviewTargetIds
 });
 ```
@@ -206,7 +206,7 @@ await tools.screen_review_commit({
   packetId,
   dispositions: [
     {
-      id: "garp_cli/example.py:10-12",
+      id: "my_project/example.py:10-12",
       disposition: "CONFIRM",
       rationale: "The failed authoritative read becomes a normal default result."
     }
@@ -300,7 +300,7 @@ Candidate/evidence data includes:
 - expanded semantic hints: `post_handler_controls`, `post_handler_calls`, `persistence_calls`;
 - expanded value-directed `interprocedural_flow` with exact bindings, at most two call edges, and fail-closed `terminal=unknown` on ambiguity;
 - `sentinel_handling` for exact `None`/`UNKNOWN`/empty/NaN-style fallback origins plus bounded guards/consumers;
-- `policy_terminal_flow` for exact constructor/result binding into policy/evaluator guards and bounded branch outcomes;
+- `structured_terminal_flow` for exact constructor/result binding into downstream consumer guards and bounded branch outcomes;
 - wider bounded caller context for unresolved cases;
 - bounded function-tail context as a final generic fallback.
 

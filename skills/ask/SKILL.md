@@ -57,7 +57,7 @@ Each packet carries the preset's explicit `reviewContract`. Treat it as authorit
 
 - `CONFIRM`: hidden/changed failure semantics with a material core outward effect.
 - `EXPLICIT_FAILURE`: the failure is surfaced or fail-closed.
-- `UI_ONLY`: rendering/formatting/display-only effect without feedback into core data, persisted state, policy, screening, or execution.
+- `UI_ONLY`: rendering/formatting/display-only effect without feedback into core data, persisted state, validation, business/control flow, or execution.
 - `OPTIONAL_ENRICHMENT`: best-effort enrichment whose absence cannot masquerade as a successful core result.
 - `CLEANUP_RETRY_TELEMETRY`: cleanup, retry/reconnect, logging, telemetry.
 - `EXPECTED_NORMALIZATION`: normalization explicitly allowed by the outward/source contract.

@@ -88,7 +88,7 @@ Preset-screening state is process-local and reset on Pi `session_start` together
 
 ## Value-directed expanded evidence
 
-The built-in Python adapter may enrich only `detail:"expanded"` packets with deterministic value-directed evidence. It traces concrete affected values through local reads/calls/returns and at most two exact call edges, treats direct fallback returns as synthetic affected values when one exact caller binding exists, suppresses false empty-container sentinels when the caught path can mutate them, and can connect exact policy/data constructors to evaluator guards with explicit bounded outcomes. Ambiguous bindings are not guessed and remain `unknown`. These extractors are evidence-only: they do not decide whether a fallback is safe or material. Review state and semantic disposition policy are unchanged.
+The built-in Python adapter may enrich only `detail:"expanded"` packets with deterministic value-directed evidence. It traces concrete affected values through local reads/calls/returns and at most two exact call edges, treats direct fallback returns as synthetic affected values when one exact caller binding exists, suppresses false empty-container sentinels when the caught path can mutate them, and can connect exact structured-data constructors to downstream consumer guards with explicit bounded outcomes. Ambiguous bindings are not guessed and remain `unknown`. These extractors are evidence-only: they do not decide whether a fallback is safe or material. Review state and semantic disposition policy are unchanged.
 
 ## Adapters
 
