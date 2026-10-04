@@ -775,7 +775,7 @@ const primaryStartParameters = Type.Object(
     deferReview: Type.Optional(Type.Boolean({ description: "Set true only for an explicitly requested refinement path." })),
     provider: Type.Optional(Type.String({ minLength: 1 })),
     model: Type.Optional(Type.String({ minLength: 1 })),
-    rescreen: Type.Optional(Type.Boolean({ description: "Explicitly discard the canonical primary initialization and run it again." })),
+    rescreen: Type.Optional(Type.Boolean({ description: "Bypass the in-session per-candidate classifier cache. Source discovery already runs on every primary start." })),
   },
   { additionalProperties: false },
 );

@@ -11,7 +11,7 @@ Prefer the preset/provider path whenever the task matches an installed preset. P
 
 1. In one Code Mode execution call `screen_preset({id})` exactly once, then `screen_discover({preset:id, scope, mode:"count"})`, then `screen_preflight({count})`. Return only compact count/approval status. No candidate text or classifier calls are allowed before approval. If approval is required, stop and ask for explicit approval.
 2. For the normal path, call `screen_primary_start({preset:id, scope, confirm})` exactly once after the guard is satisfied: use `confirm:true` only after explicit approval; if preflight returned `ok`, use `confirm:false`. **Do not call `screen_discover(... mode:"candidates")`, `screen_batch`, or `screen_review_start` yourself.** `screen_primary_start` performs candidate discovery internally, loads the exact preset-owned primary question/criteria/threshold inside the extension, computes retained IDs, and atomically starts review. The model must never copy, paraphrase, reconstruct, or override the preset primary contract.
-3. Require `primary.status === "ok"` and `reviewStarted === true` before entering semantic review. If status is `approval_required` or `error`, stop with `reviewStarted:false`. The first successful `preset+scope` initialization is canonical in the active Pi session; repeated `screen_primary_start` reuses it with zero rediscovery/classifier calls unless the user explicitly requests `rescreen:true`.
+3. Require `primary.status === "ok"` and `reviewStarted === true` before entering semantic review. If status is `approval_required` or `error`, stop with `reviewStarted:false`. Each `screen_primary_start` rediscovers candidates and creates a fresh primary snapshot. The extension reuses only unchanged per-candidate classifier outcomes in the active Pi process; `rescreen:true` explicitly bypasses that semantic cache.
 4. Refinement is opt-in only. When `--refine` is explicitly requested, call `screen_primary_start({preset:id, scope, confirm, deferReview:true})`; this stores primary retained candidates inside extension-owned process state and does not start review. Then call `screen_refinement_start({primaryRunId, confirm:false})`. If it returns `approval_required`, ask for explicit refinement approval and retry once with `confirm:true`. The extension owns the exact preset refinement question/criteria/threshold and starts review from refinement-retained IDs. Report returned `refinementYield`; `lowYield:true` means do not add further classifier stages. Never serialize retained candidate text/IDs in Code Mode to run refinement manually.
 5. After successful initialization, return only compact primary/refinement counts, `workflowId`, and review progress. Do not manually compute or pass `reviewTargetIds` in canonical preset workflows.
 
@@ -24,7 +24,7 @@ After `screen_primary_start` succeeds, the model must not maintain primary or se
 The extension owns these invariants:
 
 - preset primary/refinement semantic contracts are loaded from the preset registry inside the extension;
-- the first successful primary initialization is canonical unless `rescreen:true` is explicit;
+- every primary initialization is a fresh deterministic discovery snapshot; classifier reuse is per-candidate only;
 - primary retained IDs are `kept + undecided + withheld + errors` and are never reconstructed by the model;
 - `reviewedIds ⊆ evidenceSeenIds`;
 - standard `INSUFFICIENT_EVIDENCE` is queued for expanded evidence;

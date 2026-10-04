@@ -2,7 +2,7 @@
 
 Classifier-first semantic screening for Pi: deterministic discovery feeds a cheap primary classifier, and expensive semantic reasoning runs only on retained candidates.
 
-Version **0.7.0** adds declarative JSON use cases, a versioned evidence-provider boundary, per-candidate classifier caching, first-class efficiency metrics, and a generic bounded source provider. `python-exceptions` remains feature-frozen as the reference advanced provider; no application-specific Python semantics were added.
+Version **0.7.1** makes the 0.7 architecture practical in canonical runs: every primary start rediscovers the source snapshot, unchanged candidates reuse the in-session classifier cache independently, and declarative use cases can use a compact `source + question` preset form with deterministic engine-owned defaults. `python-exceptions` remains feature-frozen.
 
 ## Architecture at a glance
 
@@ -62,7 +62,7 @@ pi -e ./pi-semantic-screen
 GitHub tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.7.0
+pi install git:github.com/<owner>/pi-semantic-screen@v0.7.1
 ```
 
 See [Git installation and repository setup](docs/git-install.md).
@@ -88,7 +88,7 @@ Declarative JS/TS proof use case (no JS-specific extension code):
 /screen-use js-ts-silent-fallbacks my_project/
 ```
 
-Add project-local use cases as `.pi-semantic-screen/presets/<id>.json`; no package rebuild is needed when the existing provider capabilities are sufficient.
+Add project-local use cases as `.pi-semantic-screen/presets/<id>.json`; no package rebuild is needed when the existing provider capabilities are sufficient. Most `generic-source` audits need only `id`, `source.include`, `source.match`, and `question`; see [Presets](docs/presets.md).
 
 Optional explicit refinement:
 
@@ -146,7 +146,7 @@ Canonical preset initialization. The caller supplies only preset/scope plus guar
 4. computes `kept + undecided + withheld + errors`;
 5. creates the review workflow atomically.
 
-The first successful initialization for the same preset definition, scope, and resolved classifier identity is canonical for the active Pi session unless `rescreen:true` is explicit. A preset-contract or classifier-identity change starts a new initialization. Use `deferReview:true` only for an explicitly requested refinement path.
+Every `screen_primary_start` creates a fresh source snapshot: deterministic candidate discovery runs again even when preset/scope/model are unchanged. Semantic reuse happens only at the per-candidate classifier cache boundary, so unchanged candidates can be cache hits while changed/new candidates are classified. `rescreen:true` bypasses classifier reuse; it is not required to notice source changes. Use `deferReview:true` only for an explicitly requested refinement path.
 
 ### `screen_refinement_start`
 
@@ -168,7 +168,7 @@ Every input ID ends in exactly one bucket:
 kept | dropped | undecided | withheld | errors
 ```
 
-Errors and aborts never become `dropped`. 0.7 caches successful semantic outcomes per candidate. Keys include the exact classifier contract, normalized candidate ID/text, and the resolved classifier model/implementation identity; a changed candidate is recomputed independently and `rescreen:true` bypasses reuse.
+Errors and aborts never become `dropped`. Successful semantic outcomes are cached per candidate for the active Pi process. Keys include the exact classifier contract, normalized candidate ID/text, and the resolved classifier model/implementation identity; a changed candidate is recomputed independently and `rescreen:true` bypasses semantic reuse.
 
 ### `screen_review_start`
 

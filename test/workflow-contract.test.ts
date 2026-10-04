@@ -37,9 +37,10 @@ test("canonical primary semantics are extension-owned after preflight", () => {
   assert.match(skill, /reviewStarted === true/i);
 });
 
-test("first successful primary initialization is canonical and model does not reconstruct retained ids", () => {
-  assert.match(skill, /first successful `preset\+scope` initialization is canonical/i);
-  assert.match(skill, /unless the user explicitly requests `rescreen:true`/i);
+test("canonical primary rediscovers source while retained ids and semantic cache remain extension-owned", () => {
+  assert.match(skill, /Each `screen_primary_start` rediscovers candidates/i);
+  assert.match(skill, /reuses only unchanged per-candidate classifier outcomes/i);
+  assert.match(skill, /`rescreen:true` explicitly bypasses that semantic cache/i);
   assert.match(skill, /primary retained IDs are `kept \+ undecided \+ withheld \+ errors`/i);
   assert.match(skill, /never reconstructed by the model/i);
   assert.match(skill, /Do not manually compute or pass `reviewTargetIds`/i);

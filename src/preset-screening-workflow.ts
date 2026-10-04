@@ -80,7 +80,6 @@ export interface PresetScreeningWorkflowDependencies {
 
 interface PrimaryRunState {
   id: string;
-  key: string;
   preset: ScreeningPreset;
   scope: string;
   provider?: string;
@@ -205,12 +204,10 @@ function reviewError(result: ReviewWorkflowStartResult): string[] {
 }
 
 export class PresetScreeningWorkflowManager {
-  private byKey = new Map<string, PrimaryRunState>();
   private byId = new Map<string, PrimaryRunState>();
   private nextSequence = 1;
 
   reset(): void {
-    this.byKey.clear();
     this.byId.clear();
     this.nextSequence = 1;
   }
@@ -242,65 +239,10 @@ export class PresetScreeningWorkflowManager {
       };
     }
 
-    const key = `${request.preset.id}\n${JSON.stringify(request.preset)}\n${scope}\n${request.provider ?? "<default-provider>"}\n${request.model ?? "<default-model>"}`;
-    const existing = request.rescreen === true ? undefined : this.byKey.get(key);
-    if (existing) {
-      if (request.deferReview === true && existing.review) {
-        return {
-          status: "error",
-          preset: existing.preset.id,
-          scope: existing.scope,
-          primaryRunId: existing.id,
-          primary: existing.primary,
-          efficiency: efficiency(existing.primary),
-          reviewStarted: true,
-          workflowId: existing.review.workflowId,
-          progress: existing.review.progress,
-          refinementAvailable: Boolean(existing.preset.refinement),
-          refinementDeferred: false,
-          reusedInitialization: true,
-          issues: ["canonical primary already started review; use rescreen:true to request a new refinement path"],
-        };
-      }
-      if (request.deferReview !== true && !existing.review) {
-        const review = dependencies.startReview({
-          preset: existing.preset,
-          scope: existing.scope,
-          reviewTargetIds: existing.retainedItems.map((item) => item.id),
-        });
-        if (review.status !== "ok") {
-          return {
-            status: "error",
-            preset: existing.preset.id,
-            scope: existing.scope,
-            primaryRunId: existing.id,
-            primary: existing.primary,
-            efficiency: efficiency(existing.primary),
-            reviewStarted: false,
-            refinementAvailable: Boolean(existing.preset.refinement),
-            refinementDeferred: false,
-            reusedInitialization: true,
-            issues: reviewError(review),
-          };
-        }
-        existing.review = review;
-      }
-      return {
-        status: "ok",
-        preset: existing.preset.id,
-        scope: existing.scope,
-        primaryRunId: existing.id,
-        primary: existing.primary,
-        efficiency: efficiency(existing.primary),
-        reviewStarted: Boolean(existing.review),
-        workflowId: existing.review?.workflowId,
-        progress: existing.review?.progress,
-        refinementAvailable: Boolean(existing.preset.refinement),
-        refinementDeferred: !existing.review,
-        reusedInitialization: true,
-        issues: [],
-      };
-    }
+    // Every canonical primary start is a new source snapshot. Deterministic
+    // discovery is intentionally rerun so source edits cannot be hidden behind
+    // workflow-level reuse. Semantic reuse happens only in the per-candidate
+    // classifier cache inside runStage().
 
     const discovered = await dependencies.discoverCandidates({
       preset: request.preset,
@@ -374,7 +316,6 @@ export class PresetScreeningWorkflowManager {
     const id = `primary-${this.nextSequence++}`;
     const state: PrimaryRunState = {
       id,
-      key,
       preset: request.preset,
       scope,
       provider: request.provider,
@@ -407,7 +348,6 @@ export class PresetScreeningWorkflowManager {
       state.review = review;
     }
 
-    this.byKey.set(key, state);
     this.byId.set(id, state);
     return {
       status: "ok",

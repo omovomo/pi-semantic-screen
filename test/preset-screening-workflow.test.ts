@@ -147,7 +147,7 @@ test("approval-required primary never starts review or becomes canonical", async
   assert.equal(calls, 2, "failed/approval-required primary must not become canonical state");
 });
 
-test("first successful primary initialization is reused without rediscovery or reclassification", async () => {
+test("each canonical primary start rediscovers source and creates a fresh run", async () => {
   const manager = new PresetScreeningWorkflowManager();
   let discovers = 0;
   let screens = 0;
@@ -158,10 +158,11 @@ test("first successful primary initialization is reused without rediscovery or r
   const second = await manager.startPrimary({ preset, scope: "my_project/", confirm: true }, d.value);
   assert.equal(first.status, "ok");
   assert.equal(second.status, "ok");
-  assert.equal(second.reusedInitialization, true);
-  assert.equal(second.workflowId, first.workflowId);
-  assert.equal(discovers, 1);
-  assert.equal(screens, 1);
+  assert.equal(second.reusedInitialization, false);
+  assert.notEqual(second.primaryRunId, first.primaryRunId);
+  assert.notEqual(second.workflowId, first.workflowId);
+  assert.equal(discovers, 2);
+  assert.equal(screens, 2);
 });
 
 test("preset contract changes do not reuse canonical initialization state", async () => {

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { getPreset } from "../src/presets/registry.ts";
+import { parseDeclarativePreset, SIMPLE_PRESET_DEFAULTS_VERSION } from "../src/presets/declarative.ts";
 import { registerEvidenceProvider, resolvePresetEvidenceProvider } from "../src/providers/registry.ts";
 import { createGenericSourceProvider } from "../src/providers/generic-source.ts";
 import type { EvidenceProvider } from "../src/providers/types.ts";
@@ -95,4 +96,73 @@ test("0.7 provider registration rejects unsupported API versions at runtime", ()
     async evidence() { throw new Error("unused"); },
   } as unknown as EvidenceProvider;
   assert.throws(() => registerEvidenceProvider(invalid), /unsupported semantic-screen provider API version/);
+});
+
+
+test("0.7.1 compact preset normalizes deterministic classifier, review, and budget defaults", () => {
+  const preset = parseDeclarativePreset({
+    id: "compact-audit",
+    source: {
+      include: ["**/*.ts"],
+      match: ["\\bcatch\\s*\\(", { regex: "\\.catch\\s*\\(", label: "promise catch" }],
+    },
+    question: "Can a required operation failure become apparently valid default behavior?",
+  }, "compact-test");
+
+  assert.equal(SIMPLE_PRESET_DEFAULTS_VERSION, 1);
+  assert.equal(preset.id, "compact-audit");
+  assert.equal(preset.label, "compact-audit");
+  assert.equal(preset.adapter, "generic-source");
+  assert.equal(preset.provider?.kind, "generic-source");
+  assert.equal(preset.primary.threshold, 0.7);
+  assert.match(preset.primary.criteria.true, /answering the semantic question YES/);
+  assert.match(preset.review.instructions, /Can a required operation failure/);
+  assert.deepEqual(preset.evidence, {
+    targetItems: 40,
+    maxItems: 60,
+    maxSources: 10,
+    maxChars: 120000,
+    maxTokens: 7200,
+  });
+  if (preset.provider?.kind !== "generic-source") assert.fail("expected generic-source provider");
+  assert.deepEqual(preset.provider.config.patterns.map((entry) => entry.id), ["match-1", "match-2"]);
+  assert.deepEqual(preset.provider.config.candidate, { beforeLines: 1, afterLines: 5, maxChars: 3500 });
+  assert.deepEqual(preset.provider.config.evidence, {
+    standard: { beforeLines: 5, afterLines: 16, maxChars: 12000 },
+    expanded: { beforeLines: 16, afterLines: 48, maxChars: 28000 },
+  });
+  assert.deepEqual(preset.provider.config.limits, { maxFiles: 10000, maxFileBytes: 1000000, maxCandidates: 100000 });
+});
+
+test("0.7.1 compact preset supports explicit overrides without requiring advanced boilerplate", () => {
+  const preset = parseDeclarativePreset({
+    id: "compact-overrides",
+    label: "Compact overrides",
+    source: {
+      include: ["src/**/*.ts"],
+      exclude: ["**/*.test.ts"],
+      match: [{ id: "catch", regex: "catch", flags: "i" }],
+    },
+    question: "Could this path hide a required failure?",
+    classifier: {
+      threshold: 0.8,
+      keepWhen: "Evidence plausibly hides the required failure.",
+      dropWhen: "Evidence clearly surfaces the failure.",
+    },
+    evidence: { maxTokens: 4000 },
+  }, "compact-overrides-test");
+
+  assert.equal(preset.primary.threshold, 0.8);
+  assert.equal(preset.primary.criteria.true, "Evidence plausibly hides the required failure.");
+  assert.equal(preset.evidence.maxTokens, 4000);
+  assert.equal(preset.evidence.maxItems, 60);
+});
+
+test("0.7.1 compact preset rejects ambiguous mixing with advanced provider/primary form", () => {
+  assert.throws(() => parseDeclarativePreset({
+    id: "mixed",
+    source: { include: ["**/*.ts"], match: ["catch"] },
+    question: "question",
+    provider: { kind: "builtin", id: "python-exceptions" },
+  }, "mixed-test"), /cannot mix source\/question with provider\/primary\/refinement/);
 });

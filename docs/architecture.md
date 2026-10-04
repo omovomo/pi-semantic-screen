@@ -131,7 +131,7 @@ retained = kept + undecided + withheld + errors
 
 and starts `ReviewWorkflowManager` unless review was explicitly deferred for refinement.
 
-The first successful initialization for the same preset definition, scope, and resolved classifier identity is canonical for the Pi session. Changing the declarative contract or selected classifier creates a new canonical key. Approval-required/error runs never become canonical state.
+Every canonical primary start performs deterministic discovery again and creates a new primary source snapshot. This prevents workflow-level reuse from hiding source edits. Classifier reuse occurs only per candidate after discovery. Approval-required/error runs never create a primary run/review state.
 
 ### Optional refinement
 
@@ -139,7 +139,7 @@ The first successful initialization for the same preset definition, scope, and r
 
 ## Classification cache boundary
 
-0.7 replaces canonical whole-batch reuse with per-candidate semantic reuse.
+0.7.1 makes per-candidate semantic reuse reachable from the canonical flow: primary initialization never skips rediscovery because an earlier workflow exists.
 
 The cache key is derived from:
 
@@ -156,7 +156,7 @@ resolved classifier identity
 
 Only successful semantic `KEEP` / `DROP` / `UNDECIDED` outcomes are cached. `withheld` and `error` outcomes are recomputed. `rescreen:true` bypasses reuse.
 
-The classifier model is resolved **before** canonical cache lookup, so an implicit default-model change cannot reuse a stale semantic result. Changing one candidate recomputes only that candidate; changing the contract or resolved model invalidates all affected entries fail-closed.
+The classifier model is resolved **before** semantic cache lookup, so an implicit default-model change cannot reuse a stale semantic result. Changing one candidate recomputes only that candidate; changing the contract or resolved model invalidates all affected entries fail-closed. `rescreen:true` means force classifier recomputation, not "please rediscover source"; rediscovery is already the normal path.
 
 Review dispositions are intentionally **not** cached in 0.7. Review happens in the parent semantic reasoner, whose exact implementation/model identity and prompt context are not represented reliably enough for safe automatic reuse. Standard and expanded review need separate keys when that boundary becomes trustworthy.
 
@@ -220,4 +220,4 @@ The remaining step to fully external providers is a trustworthy loader policy (m
 
 ## State lifetime
 
-Preset-screening state, review state, and classification cache are process-local and reset on Pi `session_start`. Context compaction does not erase them. A Pi process restart requires a fresh screen.
+Preset-screening state, review state, and classification cache are process-local and reset on Pi `session_start`. Context compaction does not erase them. Classification cache persistence across Pi sessions is intentionally out of scope for 0.7.1; a process restart requires fresh classification.

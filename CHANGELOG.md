@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1 - 2026-10-04
+
+- Make canonical primary runs rediscover candidates on every `screen_primary_start`; workflow-level reuse can no longer hide source edits.
+- Keep classification reuse per candidate inside the active Pi process: unchanged candidates hit cache, changed/new candidates are recomputed, and removed candidates disappear with the new discovery snapshot.
+- Clarify `rescreen:true` as an explicit classifier-cache bypass rather than the mechanism required to notice source changes.
+- Add compact declarative presets using `source + question`; normalize them deterministically into the existing full `ScreeningPreset` with engine-owned classifier/review/budget defaults.
+- Preserve the 0.7.0 advanced declarative JSON form unchanged as an escape hatch for explicit provider windows, refinement, and semantic contract overrides.
+- Convert shipped `js-ts-silent-fallbacks` to the compact form; no JS-specific extension code is introduced.
+- Keep classifier cache process-local; persistence across Pi sessions remains intentionally out of scope.
+- Keep `python-exceptions` feature-frozen.
+
 ## 0.7.0 - 2026-10-04
 
 - Re-center the package as a classifier-first semantic screening engine: canonical primary results now expose first-class reduction, review-avoidance, classifier-work, and cache metrics.

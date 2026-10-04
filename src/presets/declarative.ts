@@ -1,8 +1,25 @@
 import { readFileSync } from "node:fs";
 import * as path from "node:path";
-import type { GenericSourceProviderConfig } from "../providers/generic-source.ts";
+import type { GenericSourcePattern, GenericSourceProviderConfig } from "../providers/generic-source.ts";
 import type { EvidenceProviderSpec } from "../providers/spec.ts";
 import type { ScreeningPreset, ScreeningStagePreset } from "./types.ts";
+
+export const SIMPLE_PRESET_DEFAULTS_VERSION = 1;
+
+const SIMPLE_PRIMARY_THRESHOLD = 0.70;
+const SIMPLE_EVIDENCE_DEFAULTS = {
+  targetItems: 40,
+  maxItems: 60,
+  maxSources: 10,
+  maxChars: 120_000,
+  maxTokens: 7_200,
+} as const;
+const SIMPLE_SOURCE_DEFAULTS = {
+  candidate: { beforeLines: 1, afterLines: 5, maxChars: 3_500 },
+  standard: { beforeLines: 5, afterLines: 16, maxChars: 12_000 },
+  expanded: { beforeLines: 16, afterLines: 48, maxChars: 28_000 },
+  limits: { maxFiles: 10_000, maxFileBytes: 1_000_000, maxCandidates: 100_000 },
+} as const;
 
 function object(value: unknown, where: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${where} must be an object`);
@@ -11,7 +28,11 @@ function object(value: unknown, where: string): Record<string, unknown> {
 
 function string(value: unknown, where: string): string {
   if (typeof value !== "string" || !value.trim()) throw new Error(`${where} must be a non-empty string`);
-  return value;
+  return value.trim();
+}
+
+function optionalString(value: unknown, where: string): string | undefined {
+  return value === undefined ? undefined : string(value, where);
 }
 
 function number(value: unknown, where: string, min: number, max: number): number {
@@ -43,6 +64,10 @@ function stage(value: unknown, where: string): ScreeningStagePreset {
 function stringArray(value: unknown, where: string): string[] {
   if (!Array.isArray(value) || value.length === 0) throw new Error(`${where} must be a non-empty string array`);
   return value.map((item, index) => string(item, `${where}[${index}]`));
+}
+
+function optionalStringArray(value: unknown, where: string): string[] | undefined {
+  return value === undefined ? undefined : stringArray(value, where);
 }
 
 function genericSourceConfig(value: unknown, where: string): GenericSourceProviderConfig {
@@ -108,8 +133,89 @@ function provider(value: unknown): { spec: EvidenceProviderSpec; adapter: string
   throw new Error(`provider.kind is unsupported: ${kind}`);
 }
 
-export function parseDeclarativePreset(value: unknown, source = "declarative preset"): ScreeningPreset {
-  const input = object(value, source);
+function simplePattern(value: unknown, index: number, where: string): GenericSourcePattern {
+  if (typeof value === "string") {
+    return { id: `match-${index + 1}`, regex: string(value, `${where}[${index}]`) };
+  }
+  const entry = object(value, `${where}[${index}]`);
+  return {
+    id: optionalString(entry.id, `${where}[${index}].id`) ?? `match-${index + 1}`,
+    regex: string(entry.regex, `${where}[${index}].regex`),
+    ...(entry.flags === undefined ? {} : { flags: string(entry.flags, `${where}[${index}].flags`) }),
+    ...(entry.label === undefined ? {} : { label: string(entry.label, `${where}[${index}].label`) }),
+  };
+}
+
+function simpleSource(value: unknown, where: string): GenericSourceProviderConfig {
+  const input = object(value, where);
+  if (!Array.isArray(input.match) || input.match.length === 0) throw new Error(`${where}.match must be a non-empty array`);
+  const exclude = optionalStringArray(input.exclude, `${where}.exclude`);
+  return {
+    include: stringArray(input.include, `${where}.include`),
+    ...(exclude ? { exclude } : {}),
+    patterns: input.match.map((entry, index) => simplePattern(entry, index, `${where}.match`)),
+    candidate: { ...SIMPLE_SOURCE_DEFAULTS.candidate },
+    evidence: {
+      standard: { ...SIMPLE_SOURCE_DEFAULTS.standard },
+      expanded: { ...SIMPLE_SOURCE_DEFAULTS.expanded },
+    },
+    limits: { ...SIMPLE_SOURCE_DEFAULTS.limits },
+  };
+}
+
+function simpleEvidence(value: unknown, where: string): ScreeningPreset["evidence"] {
+  if (value === undefined) return { ...SIMPLE_EVIDENCE_DEFAULTS };
+  const input = object(value, where);
+  return {
+    targetItems: input.targetItems === undefined ? SIMPLE_EVIDENCE_DEFAULTS.targetItems : integer(input.targetItems, `${where}.targetItems`, 1, 10_000),
+    maxItems: input.maxItems === undefined ? SIMPLE_EVIDENCE_DEFAULTS.maxItems : integer(input.maxItems, `${where}.maxItems`, 1, 10_000),
+    maxSources: input.maxSources === undefined ? SIMPLE_EVIDENCE_DEFAULTS.maxSources : integer(input.maxSources, `${where}.maxSources`, 1, 10_000),
+    maxChars: input.maxChars === undefined ? SIMPLE_EVIDENCE_DEFAULTS.maxChars : integer(input.maxChars, `${where}.maxChars`, 1, 10_000_000),
+    maxTokens: input.maxTokens === undefined ? SIMPLE_EVIDENCE_DEFAULTS.maxTokens : integer(input.maxTokens, `${where}.maxTokens`, 1, 1_000_000),
+  };
+}
+
+function parseSimplePreset(input: Record<string, unknown>, source: string): ScreeningPreset {
+  if (input.provider !== undefined || input.primary !== undefined || input.refinement !== undefined) {
+    throw new Error(`${source}: simple preset cannot mix source/question with provider/primary/refinement`);
+  }
+  const id = string(input.id, `${source}.id`);
+  const question = string(input.question, `${source}.question`);
+  const classifier = input.classifier === undefined ? {} : object(input.classifier, `${source}.classifier`);
+  const review = input.review === undefined ? {} : object(input.review, `${source}.review`);
+  const config = simpleSource(input.source, `${source}.source`);
+  const threshold = classifier.threshold === undefined
+    ? SIMPLE_PRIMARY_THRESHOLD
+    : number(classifier.threshold, `${source}.classifier.threshold`, 0.5, 1);
+  const keepWhen = optionalString(classifier.keepWhen, `${source}.classifier.keepWhen`) ??
+    "The bounded candidate evidence provides concrete support for answering the semantic question YES.";
+  const dropWhen = optionalString(classifier.dropWhen, `${source}.classifier.dropWhen`) ??
+    "The bounded candidate evidence clearly supports answering the semantic question NO.";
+  const defaultInstructions = `Semantic question: ${question}\nJudge only the bounded emitted evidence. Do not infer hidden facts, callers, or dataflow that are not shown. Missing or ambiguous context is INSUFFICIENT_EVIDENCE.`;
+  const defaultConfirm = `CONFIRM only when the bounded evidence establishes a YES answer to this semantic question: ${question}`;
+  const defaultReject = "Use a terminal non-finding disposition only when the bounded evidence establishes that the semantic question is not satisfied. Use INSUFFICIENT_EVIDENCE when neither conclusion is established.";
+
+  return {
+    id,
+    label: optionalString(input.label, `${source}.label`) ?? id,
+    description: optionalString(input.description, `${source}.description`) ?? question,
+    adapter: "generic-source",
+    provider: { kind: "generic-source", config },
+    primary: {
+      question,
+      criteria: { true: keepWhen, false: dropWhen },
+      threshold,
+    },
+    review: {
+      instructions: optionalString(review.instructions, `${source}.review.instructions`) ?? defaultInstructions,
+      confirmWhen: optionalString(review.confirmWhen, `${source}.review.confirmWhen`) ?? defaultConfirm,
+      rejectWhen: optionalString(review.rejectWhen, `${source}.review.rejectWhen`) ?? defaultReject,
+    },
+    evidence: simpleEvidence(input.evidence, `${source}.evidence`),
+  };
+}
+
+function parseAdvancedPreset(input: Record<string, unknown>, source: string): ScreeningPreset {
   const selectedProvider = provider(input.provider);
   const review = object(input.review, `${source}.review`);
   const evidence = object(input.evidence, `${source}.evidence`);
@@ -137,6 +243,12 @@ export function parseDeclarativePreset(value: unknown, source = "declarative pre
   };
 }
 
+export function parseDeclarativePreset(value: unknown, source = "declarative preset"): ScreeningPreset {
+  const input = object(value, source);
+  const isSimple = input.source !== undefined || input.question !== undefined;
+  return isSimple ? parseSimplePreset(input, source) : parseAdvancedPreset(input, source);
+}
+
 export function loadDeclarativePresetFile(filePath: string): ScreeningPreset {
   const absolute = path.resolve(filePath);
   let parsed: unknown;
@@ -145,6 +257,5 @@ export function loadDeclarativePresetFile(filePath: string): ScreeningPreset {
   } catch (error) {
     throw new Error(`failed to load declarative preset ${absolute}: ${error instanceof Error ? error.message : String(error)}`);
   }
-  const preset = parseDeclarativePreset(parsed, absolute);
-  return preset;
+  return parseDeclarativePreset(parsed, absolute);
 }
