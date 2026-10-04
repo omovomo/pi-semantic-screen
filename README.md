@@ -248,7 +248,8 @@ needsExpandedEvidenceIds
 blockedEvidence
 findings
 pending packet + packetId
-cumulative disposition counts
+cumulative disposition event counts
+final per-target disposition counts
 ```
 
 Important invariants:
@@ -265,6 +266,14 @@ expanded insufficient evidence blocks only that ID
 The model never serializes preset semantic contracts, retained candidate IDs, or these review sets. This eliminates classifier-contract drift, model-generated retained-ID arithmetic, stale expanded queues, accidental duplicate packets, empty-ID fetches, and manual state-merge errors.
 
 Screening/review state survives normal turns and host context compaction because it is owned by the extension process. **Restarting Pi clears active primary/refinement and review workflows.** Start a fresh screen after a process restart.
+
+Terminal workflow results expose two accounting views:
+
+- `dispositionEventCounts` counts every committed standard/expanded review decision;
+- `finalDispositionCounts` counts each review target exactly once at its terminal outcome.
+
+Thus a target that is `INSUFFICIENT_EVIDENCE` at standard detail and remains unresolved at expanded detail contributes two disposition events but one final `INSUFFICIENT_EVIDENCE` outcome. The legacy `dispositionCounts` field remains in 0.7.x as a deprecated alias of `dispositionEventCounts`.
+
 
 ## Review contract
 

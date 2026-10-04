@@ -125,6 +125,14 @@ test("terminal workflow returns full findings, blocked evidence, and cumulative 
   assert.deepEqual(final.blockedEvidence, [{ id: "b", rationale: "still ambiguous" }]);
   assert.equal(final.dispositionCounts?.CONFIRM, 1);
   assert.equal(final.dispositionCounts?.INSUFFICIENT_EVIDENCE, 2);
+  assert.equal(final.dispositionEventCounts?.CONFIRM, 1);
+  assert.equal(final.dispositionEventCounts?.INSUFFICIENT_EVIDENCE, 2);
+  assert.equal(final.finalDispositionCounts?.CONFIRM, 1);
+  assert.equal(final.finalDispositionCounts?.INSUFFICIENT_EVIDENCE, 1);
+  assert.equal(
+    Object.values(final.finalDispositionCounts ?? {}).reduce((sum, count) => sum + count, 0),
+    2,
+  );
 });
 
 test("latest workflow can be resumed without model-owned review state", async () => {
@@ -175,4 +183,33 @@ test("review workflow commit accepts compact tuple dispositions and normalizes t
   assert.deepEqual(committed.findings, [{ id: "a", rationale: "hidden core fallback" }]);
   assert.equal(committed.dispositionCounts?.CONFIRM, 1);
   assert.equal(committed.dispositionCounts?.UI_ONLY, 1);
+  assert.equal(committed.dispositionEventCounts?.CONFIRM, 1);
+  assert.equal(committed.dispositionEventCounts?.UI_ONLY, 1);
+  assert.equal(committed.finalDispositionCounts?.CONFIRM, 1);
+  assert.equal(committed.finalDispositionCounts?.UI_ONLY, 1);
+});
+
+
+test("final disposition counts record the resolved expanded outcome once per candidate", async () => {
+  const manager = new ReviewWorkflowManager();
+  const start = manager.start({ preset: "p", scope: ".", reviewTargetIds: ["a"], targetItems: 1 });
+  const build = async ({ ids, detail }: { ids: string[]; detail: "standard" | "expanded" }) => packet(ids, detail);
+  const standard = await manager.next(start.workflowId, build);
+  manager.commit({
+    workflowId: start.workflowId,
+    packetId: standard.packetId!,
+    dispositions: [{ id: "a", disposition: "INSUFFICIENT_EVIDENCE", rationale: "needs more" }],
+  });
+  const expanded = await manager.next(start.workflowId, build);
+  const final = manager.commit({
+    workflowId: start.workflowId,
+    packetId: expanded.packetId!,
+    dispositions: [{ id: "a", disposition: "EXPLICIT_FAILURE", rationale: "expanded evidence shows explicit failure" }],
+  });
+  assert.equal(final.status, "complete");
+  assert.equal(final.dispositionEventCounts?.INSUFFICIENT_EVIDENCE, 1);
+  assert.equal(final.dispositionEventCounts?.EXPLICIT_FAILURE, 1);
+  assert.equal(final.finalDispositionCounts?.INSUFFICIENT_EVIDENCE, 0);
+  assert.equal(final.finalDispositionCounts?.EXPLICIT_FAILURE, 1);
+  assert.equal(final.dispositionCounts?.INSUFFICIENT_EVIDENCE, 1);
 });

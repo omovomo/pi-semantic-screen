@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3 - 2026-10-04
+
+- Clarify terminal review accounting by separating cumulative review-attempt counts (`dispositionEventCounts`) from unique per-target terminal outcomes (`finalDispositionCounts`).
+- Count standard and expanded `INSUFFICIENT_EVIDENCE` as two review events but one final `INSUFFICIENT_EVIDENCE` outcome when expanded evidence remains blocked.
+- Preserve legacy `dispositionCounts` as a deprecated compatibility alias of `dispositionEventCounts` throughout 0.7.x.
+- Keep classifier, provider, compact-preset, cache, evidence, and review decision semantics unchanged.
+
 ## 0.7.2 - 2026-10-04
 
 - Add bounded optional `dropHints` to compact declarative presets so use cases can improve conservative primary negative filtering without expanding into a full classifier contract.

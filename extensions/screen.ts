@@ -533,6 +533,20 @@ const reviewDecisionTupleSchema = Type.Tuple([
 
 const reviewDecisionCommitSchema = Type.Union([reviewDecisionInputSchema, reviewDecisionTupleSchema]);
 
+const reviewDispositionCountsSchema = Type.Object(
+  {
+    CONFIRM: Type.Integer({ minimum: 0 }),
+    EXPLICIT_FAILURE: Type.Integer({ minimum: 0 }),
+    UI_ONLY: Type.Integer({ minimum: 0 }),
+    OPTIONAL_ENRICHMENT: Type.Integer({ minimum: 0 }),
+    CLEANUP_RETRY_TELEMETRY: Type.Integer({ minimum: 0 }),
+    EXPECTED_NORMALIZATION: Type.Integer({ minimum: 0 }),
+    NO_OUTWARD_EFFECT: Type.Integer({ minimum: 0 }),
+    INSUFFICIENT_EVIDENCE: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+
 const reviewApplyParameters = Type.Object(
   {
     preset: Type.String({ minLength: 1 }),
@@ -558,19 +572,7 @@ const reviewApplyOutputSchema = Type.Object(
     findings: Type.Array(
       Type.Object({ id: Type.String(), rationale: Type.String() }, { additionalProperties: false }),
     ),
-    dispositionCounts: Type.Object(
-      {
-        CONFIRM: Type.Integer({ minimum: 0 }),
-        EXPLICIT_FAILURE: Type.Integer({ minimum: 0 }),
-        UI_ONLY: Type.Integer({ minimum: 0 }),
-        OPTIONAL_ENRICHMENT: Type.Integer({ minimum: 0 }),
-        CLEANUP_RETRY_TELEMETRY: Type.Integer({ minimum: 0 }),
-        EXPECTED_NORMALIZATION: Type.Integer({ minimum: 0 }),
-        NO_OUTWARD_EFFECT: Type.Integer({ minimum: 0 }),
-        INSUFFICIENT_EVIDENCE: Type.Integer({ minimum: 0 }),
-      },
-      { additionalProperties: false },
-    ),
+    dispositionCounts: reviewDispositionCountsSchema,
     issues: Type.Array(Type.String()),
   },
   { additionalProperties: false },
@@ -646,21 +648,9 @@ const reviewNextOutputSchema = Type.Object(
     packet: Type.Optional(evidenceOutputSchema),
     findings: Type.Optional(Type.Array(reviewFindingSchema)),
     blockedEvidence: Type.Optional(Type.Array(reviewFindingSchema)),
-    dispositionCounts: Type.Optional(
-      Type.Object(
-        {
-          CONFIRM: Type.Integer({ minimum: 0 }),
-          EXPLICIT_FAILURE: Type.Integer({ minimum: 0 }),
-          UI_ONLY: Type.Integer({ minimum: 0 }),
-          OPTIONAL_ENRICHMENT: Type.Integer({ minimum: 0 }),
-          CLEANUP_RETRY_TELEMETRY: Type.Integer({ minimum: 0 }),
-          EXPECTED_NORMALIZATION: Type.Integer({ minimum: 0 }),
-          NO_OUTWARD_EFFECT: Type.Integer({ minimum: 0 }),
-          INSUFFICIENT_EVIDENCE: Type.Integer({ minimum: 0 }),
-        },
-        { additionalProperties: false },
-      ),
-    ),
+    dispositionCounts: Type.Optional(reviewDispositionCountsSchema),
+    dispositionEventCounts: Type.Optional(reviewDispositionCountsSchema),
+    finalDispositionCounts: Type.Optional(reviewDispositionCountsSchema),
     issues: Type.Array(Type.String()),
   },
   { additionalProperties: false },
@@ -690,21 +680,9 @@ const reviewCommitOutputSchema = Type.Object(
     newBlockedEvidence: Type.Array(reviewFindingSchema),
     findings: Type.Optional(Type.Array(reviewFindingSchema)),
     blockedEvidence: Type.Optional(Type.Array(reviewFindingSchema)),
-    dispositionCounts: Type.Optional(
-      Type.Object(
-        {
-          CONFIRM: Type.Integer({ minimum: 0 }),
-          EXPLICIT_FAILURE: Type.Integer({ minimum: 0 }),
-          UI_ONLY: Type.Integer({ minimum: 0 }),
-          OPTIONAL_ENRICHMENT: Type.Integer({ minimum: 0 }),
-          CLEANUP_RETRY_TELEMETRY: Type.Integer({ minimum: 0 }),
-          EXPECTED_NORMALIZATION: Type.Integer({ minimum: 0 }),
-          NO_OUTWARD_EFFECT: Type.Integer({ minimum: 0 }),
-          INSUFFICIENT_EVIDENCE: Type.Integer({ minimum: 0 }),
-        },
-        { additionalProperties: false },
-      ),
-    ),
+    dispositionCounts: Type.Optional(reviewDispositionCountsSchema),
+    dispositionEventCounts: Type.Optional(reviewDispositionCountsSchema),
+    finalDispositionCounts: Type.Optional(reviewDispositionCountsSchema),
     issues: Type.Array(Type.String()),
   },
   { additionalProperties: false },

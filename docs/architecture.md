@@ -210,6 +210,9 @@ No review token/cost figures are fabricated because review inference is not exec
 
 Ambiguity is never silently converted into success.
 
+Terminal workflow accounting distinguishes review attempts from final candidate outcomes. `dispositionEventCounts` counts every committed standard/expanded decision, while `finalDispositionCounts` counts each review target exactly once at its terminal outcome. Consequently, standard then expanded `INSUFFICIENT_EVIDENCE` yields two events but one final blocked outcome. Legacy `dispositionCounts` remains a deprecated event-count alias for 0.7.x compatibility.
+
+
 ## Semantic stability
 
 `src/stability.ts` provides a generic manifest comparator for regression runs. Given `{id, disposition}` entries it reports common candidate IDs, stable/changed disposition counts, stability ratio, and CONFIRM/BLOCKED transitions. It is intentionally a pure comparison primitive rather than a persistent database.

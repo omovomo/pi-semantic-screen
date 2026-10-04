@@ -1,6 +1,6 @@
 {
   "name": "pi-semantic-screen",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "type": "module",
   "description": "Classifier-first semantic screening engine with declarative presets and pluggable evidence providers for Pi",
   "keywords": [

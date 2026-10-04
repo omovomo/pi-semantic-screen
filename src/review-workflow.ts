@@ -62,7 +62,10 @@ export interface ReviewWorkflowNextResult {
   packet?: ReviewEvidencePacket;
   findings?: ReviewFindingItem[];
   blockedEvidence?: ReviewBlockedItem[];
+  /** @deprecated Use dispositionEventCounts for review attempts or finalDispositionCounts for terminal per-candidate outcomes. */
   dispositionCounts?: Record<ReviewDispositionId, number>;
+  dispositionEventCounts?: Record<ReviewDispositionId, number>;
+  finalDispositionCounts?: Record<ReviewDispositionId, number>;
   issues: string[];
 }
 
@@ -75,7 +78,10 @@ export interface ReviewWorkflowCommitResult {
   newBlockedEvidence: ReviewBlockedItem[];
   findings?: ReviewFindingItem[];
   blockedEvidence?: ReviewBlockedItem[];
+  /** @deprecated Use dispositionEventCounts for review attempts or finalDispositionCounts for terminal per-candidate outcomes. */
   dispositionCounts?: Record<ReviewDispositionId, number>;
+  dispositionEventCounts?: Record<ReviewDispositionId, number>;
+  finalDispositionCounts?: Record<ReviewDispositionId, number>;
   issues: string[];
 }
 
@@ -105,7 +111,8 @@ interface ReviewWorkflowState {
   needsExpandedEvidenceIds: Set<string>;
   blockedEvidence: Map<string, string>;
   findings: Map<string, string>;
-  dispositionCounts: Record<ReviewDispositionId, number>;
+  dispositionEventCounts: Record<ReviewDispositionId, number>;
+  finalDispositions: Map<string, ReviewDispositionId>;
   standardReviewed: number;
   standardResolved: number;
   expandedAttempted: number;
@@ -172,7 +179,8 @@ export class ReviewWorkflowManager {
       needsExpandedEvidenceIds: new Set(),
       blockedEvidence: new Map(),
       findings: new Map(),
-      dispositionCounts: emptyDispositionCounts(),
+      dispositionEventCounts: emptyDispositionCounts(),
+      finalDispositions: new Map(),
       standardReviewed: 0,
       standardResolved: 0,
       expandedAttempted: 0,
@@ -299,10 +307,11 @@ export class ReviewWorkflowManager {
       };
     }
 
+    const decisions = normalizeReviewDecisions(input.dispositions);
     const applied = applyReviewDispositions({
       packetIds: pending.packet.packetIds,
       detail: pending.detail,
-      dispositions: normalizeReviewDecisions(input.dispositions),
+      dispositions: decisions,
     });
     if (applied.status !== "ok") {
       return {
@@ -323,7 +332,12 @@ export class ReviewWorkflowManager {
     for (const blocked of applied.blockedEvidence) state.blockedEvidence.set(blocked.id, blocked.rationale);
     for (const finding of applied.findings) state.findings.set(finding.id, finding.rationale);
     for (const disposition of REVIEW_DISPOSITION_IDS) {
-      state.dispositionCounts[disposition] += applied.dispositionCounts[disposition];
+      state.dispositionEventCounts[disposition] += applied.dispositionCounts[disposition];
+    }
+    for (const decision of decisions) {
+      if (decision.disposition !== "INSUFFICIENT_EVIDENCE" || pending.detail === "expanded") {
+        state.finalDispositions.set(decision.id, decision.disposition);
+      }
     }
     if (pending.detail === "standard") {
       state.standardReviewed += pending.packet.packetIds.length;
@@ -350,7 +364,9 @@ export class ReviewWorkflowManager {
       newBlockedEvidence: applied.blockedEvidence,
       findings: terminal ? this.findings(state) : undefined,
       blockedEvidence: terminal ? this.blocked(state) : undefined,
-      dispositionCounts: terminal ? { ...state.dispositionCounts } : undefined,
+      dispositionCounts: terminal ? { ...state.dispositionEventCounts } : undefined,
+      dispositionEventCounts: terminal ? { ...state.dispositionEventCounts } : undefined,
+      finalDispositionCounts: terminal ? this.finalDispositionCounts(state) : undefined,
       issues: [],
     };
   }
@@ -396,6 +412,15 @@ export class ReviewWorkflowManager {
       .map((id) => ({ id, rationale: state.findings.get(id)! }));
   }
 
+  private finalDispositionCounts(state: ReviewWorkflowState): Record<ReviewDispositionId, number> {
+    const counts = emptyDispositionCounts();
+    for (const id of state.reviewTargetIds) {
+      const disposition = state.finalDispositions.get(id);
+      if (disposition) counts[disposition] += 1;
+    }
+    return counts;
+  }
+
   private blocked(state: ReviewWorkflowState): ReviewBlockedItem[] {
     return state.reviewTargetIds
       .filter((id) => state.blockedEvidence.has(id))
@@ -412,7 +437,9 @@ export class ReviewWorkflowManager {
       progress: this.progress(state),
       findings: this.findings(state),
       blockedEvidence: this.blocked(state),
-      dispositionCounts: { ...state.dispositionCounts },
+      dispositionCounts: { ...state.dispositionEventCounts },
+      dispositionEventCounts: { ...state.dispositionEventCounts },
+      finalDispositionCounts: this.finalDispositionCounts(state),
       issues: [],
     };
   }
