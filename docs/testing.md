@@ -65,6 +65,7 @@ screen_preset          1
 screen_discover        1 (count only; candidate discovery is internal)
 screen_preflight       1
 screen_primary_start   1
+screen_primary_manifest 0 unless explicitly auditing primary outcomes
 screen_refinement_start 0 unless `--refine`
 screen_batch           0 in canonical preset initialization
 screen_review_start    0 in canonical preset initialization

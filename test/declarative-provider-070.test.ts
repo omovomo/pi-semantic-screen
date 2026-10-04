@@ -38,6 +38,8 @@ test("0.7 shipped JS/TS use case is declarative and uses generic-source provider
     assert.equal(discovered.total, 2);
     assert.equal(discovered.items?.length, 2);
     assert.ok(discovered.items?.every((item) => item.id.startsWith("gs:")));
+    assert.ok(discovered.items?.every((item) => item.source?.endsWith("sample.ts")));
+    assert.ok(discovered.items?.every((item) => typeof item.line === "number" && typeof item.column === "number"));
     const ids = discovered.items!.map((item) => item.id);
     const evidence = await provider.evidence({ scope: root, ids, maxItems: 10, maxSources: 10, maxChars: 100_000, detail: "standard" });
     assert.equal(evidence.status, "ok");

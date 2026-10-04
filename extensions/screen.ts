@@ -79,7 +79,7 @@ function agentMessageText(message: unknown): string {
 }
 
 function isSemanticScreenPrompt(prompt: string): boolean {
-  return /semantic_screen_review_state|screen_preset|screen_discover|screen_primary_start|screen_refinement_start|screen_evidence|screen_review_apply|screen_review_start|screen_review_next|screen_review_commit|screen_preflight|screen_batch|screen-use|screen-exceptions|screen-continue/i.test(prompt);
+  return /semantic_screen_review_state|screen_preset|screen_discover|screen_primary_start|screen_primary_manifest|screen_refinement_start|screen_evidence|screen_review_apply|screen_review_start|screen_review_next|screen_review_commit|screen_preflight|screen_batch|screen-use|screen-exceptions|screen-continue/i.test(prompt);
 }
 
 function isSemanticScreenComplete(text: string): boolean {
@@ -398,7 +398,13 @@ const discoverOutputSchema = Type.Object(
     items: Type.Optional(
       Type.Array(
         Type.Object(
-          { id: Type.String(), text: Type.String() },
+          {
+            id: Type.String(),
+            text: Type.String(),
+            source: Type.Optional(Type.String()),
+            line: Type.Optional(Type.Integer({ minimum: 1 })),
+            column: Type.Optional(Type.Integer({ minimum: 1 })),
+          },
           { additionalProperties: false },
         ),
       ),
@@ -774,6 +780,55 @@ const primaryStartOutputSchema = Type.Object(
     reusedInitialization: Type.Boolean(),
     projectedCalls: Type.Optional(Type.Integer({ minimum: 0 })),
     callLimit: Type.Optional(Type.Integer({ minimum: 1 })),
+    issues: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
+const primaryOutcomeLabelSchema = Type.Union([
+  Type.Literal("KEEP"),
+  Type.Literal("DROP"),
+  Type.Literal("UNDECIDED"),
+  Type.Literal("WITHHELD"),
+  Type.Literal("ERROR"),
+]);
+
+const primaryManifestParameters = Type.Object(
+  {
+    primaryRunId: Type.String({ minLength: 1 }),
+    labels: Type.Optional(Type.Array(primaryOutcomeLabelSchema, { minItems: 1, maxItems: 5 })),
+    offset: Type.Optional(Type.Integer({ minimum: 0 })),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000 })),
+  },
+  { additionalProperties: false },
+);
+
+const primaryManifestOutputSchema = Type.Object(
+  {
+    status: Type.Union([Type.Literal("ok"), Type.Literal("error")]),
+    primaryRunId: Type.String(),
+    preset: Type.Optional(Type.String()),
+    scope: Type.Optional(Type.String()),
+    threshold: Type.Optional(Type.Number({ minimum: 0.5, maximum: 1 })),
+    labels: Type.Array(primaryOutcomeLabelSchema),
+    total: Type.Integer({ minimum: 0 }),
+    matched: Type.Integer({ minimum: 0 }),
+    offset: Type.Integer({ minimum: 0 }),
+    limit: Type.Integer({ minimum: 1 }),
+    returned: Type.Integer({ minimum: 0 }),
+    items: Type.Array(Type.Object(
+      {
+        id: Type.String(),
+        source: Type.Optional(Type.String()),
+        line: Type.Optional(Type.Integer({ minimum: 1 })),
+        column: Type.Optional(Type.Integer({ minimum: 1 })),
+        label: primaryOutcomeLabelSchema,
+        keepProbability: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+        confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+        reason: Type.String(),
+      },
+      { additionalProperties: false },
+    )),
     issues: Type.Array(Type.String()),
   },
   { additionalProperties: false },
@@ -1193,6 +1248,40 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         },
         structuredContent: result as unknown as JsonValue,
         ...(toolUsage ? { usage: toolUsage } : {}),
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "screen_primary_manifest",
+    label: "Semantic primary outcome manifest",
+    description:
+      "Read the extension-owned primary classifier outcome manifest for an existing primaryRunId. Supports label filtering and pagination without rerunning discovery, classification, or review.",
+    promptSnippet: "Inspect primary classifier outcomes, especially DROP candidates, for audit and observability",
+    parameters: primaryManifestParameters,
+    outputSchema: primaryManifestOutputSchema,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    async execute(_toolCallId, params) {
+      const request = params as {
+        primaryRunId: string;
+        labels?: Array<"KEEP" | "DROP" | "UNDECIDED" | "WITHHELD" | "ERROR">;
+        offset?: number;
+        limit?: number;
+      };
+      const result = presetScreeningWorkflows.primaryManifest(request);
+      return {
+        content: [{ type: "text", text: JSON.stringify(result) }],
+        details: {
+          primaryRunId: request.primaryRunId,
+          labels: result.labels,
+          returned: result.returned,
+        },
+        structuredContent: result as unknown as JsonValue,
       };
     },
   });

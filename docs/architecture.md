@@ -133,6 +133,8 @@ retained = kept + undecided + withheld + errors
 
 and starts `ReviewWorkflowManager` unless review was explicitly deferred for refinement.
 
+Completed primary snapshots can be inspected through the read-only `screen_primary_manifest` boundary. It filters and paginates extension-owned primary outcomes without rediscovery or reclassification. Generic providers may attach deterministic source/line/column metadata to candidates; missing locations and semantic rationales are never fabricated.
+
 Every canonical primary start performs deterministic discovery again and creates a new primary source snapshot. This prevents workflow-level reuse from hiding source edits. Classifier reuse occurs only per candidate after discovery. Approval-required/error runs never create a primary run/review state.
 
 ### Optional refinement

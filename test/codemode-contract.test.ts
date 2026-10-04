@@ -9,6 +9,7 @@ test("extension exposes screening and extension-owned review tools", () => {
     "screen_preset",
     "screen_discover",
     "screen_primary_start",
+    "screen_primary_manifest",
     "screen_refinement_start",
     "screen_evidence",
     "screen_review_apply",
@@ -19,6 +20,7 @@ test("extension exposes screening and extension-owned review tools", () => {
     "screen_batch",
   ]) assert.match(source, new RegExp(`name:\\s*"${name}"`));
   assert.match(source, /primaryStartOutputSchema/);
+  assert.match(source, /primaryManifestOutputSchema/);
   assert.match(source, /refinementStartOutputSchema/);
   assert.match(source, /PresetScreeningWorkflowManager/);
   assert.match(source, /exactPresetStageInput/);
@@ -68,6 +70,7 @@ test("stateful review tools start, return idempotent pending packets, and commit
 
 test("canonical preset screening never accepts model-supplied semantic contracts", () => {
   assert.match(source, /name:\s*"screen_primary_start"[\s\S]*?parameters:\s*primaryStartParameters/);
+  assert.match(source, /name:\s*"screen_primary_manifest"[\s\S]*?parameters:\s*primaryManifestParameters/);
   assert.match(source, /name:\s*"screen_refinement_start"[\s\S]*?parameters:\s*refinementStartParameters/);
   const primarySchema = source.slice(
     source.indexOf("const primaryStartParameters"),

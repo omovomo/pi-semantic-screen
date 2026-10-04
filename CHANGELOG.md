@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.4 - 2026-10-04
+
+- Add read-only `screen_primary_manifest` observability for completed canonical primary runs, filterable by `KEEP`, `DROP`, `UNDECIDED`, `WITHHELD`, and `ERROR` with pagination.
+- Report candidate ID, optional deterministic source/line/column metadata, classifier label, keep probability, label confidence for terminal KEEP/DROP, and a deterministic threshold-based reason without inventing model rationale.
+- Extend the generic-source provider candidate contract with optional source location metadata; existing providers may omit these additive fields.
+- Keep classifier, cache, preset, evidence, review, and terminal disposition semantics unchanged.
+
 ## 0.7.3 - 2026-10-04
 
 - Clarify terminal review accounting by separating cumulative review-attempt counts (`dispositionEventCounts`) from unique per-target terminal outcomes (`finalDispositionCounts`).

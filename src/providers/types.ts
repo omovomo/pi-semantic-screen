@@ -1,6 +1,10 @@
 export interface EvidenceCandidate {
   id: string;
   text: string;
+  /** Optional deterministic source metadata for observability; providers may omit it. */
+  source?: string;
+  line?: number;
+  column?: number;
 }
 
 export interface EvidenceProviderIssue {

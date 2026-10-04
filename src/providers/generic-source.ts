@@ -303,7 +303,17 @@ export function createGenericSourceProvider(id: string, config: GenericSourcePro
           adapter: providerId,
           scope: request.scope,
           total: located.length,
-          ...(request.mode === "candidates" ? { items: located.map(({ id: candidateIdValue, text }) => ({ id: candidateIdValue, text })) } : {}),
+          ...(request.mode === "candidates"
+            ? {
+                items: located.map(({ id: candidateIdValue, text, source, line, column }) => ({
+                  id: candidateIdValue,
+                  text,
+                  source,
+                  line,
+                  column,
+                })),
+              }
+            : {}),
         };
       } catch (error) {
         return errorDiscover(providerId, request.scope, error);

@@ -148,6 +148,20 @@ Canonical preset initialization. The caller supplies only preset/scope plus guar
 
 Every `screen_primary_start` creates a fresh source snapshot: deterministic candidate discovery runs again even when preset/scope/model are unchanged. Semantic reuse happens only at the per-candidate classifier cache boundary, so unchanged candidates can be cache hits while changed/new candidates are classified. `rescreen:true` bypasses classifier reuse; it is not required to notice source changes. Use `deferReview:true` only for an explicitly requested refinement path.
 
+### `screen_primary_manifest`
+
+Read-only observability for a completed canonical primary run. It never reruns discovery, classification, or review. Use the opaque `primaryRunId` returned by `screen_primary_start` and optionally filter by labels:
+
+```ts
+await tools.screen_primary_manifest({
+  primaryRunId,
+  labels: ["DROP"],
+  limit: 200,
+});
+```
+
+Each item reports the candidate ID, optional provider-supplied source/line/column, primary label, keep probability, DROP/KEEP label confidence, and a deterministic threshold-based `reason`. `reason` is not model chain-of-thought or a generated semantic rationale; it only explains how the recorded probability mapped to the bucket. This is intended for DROP audits and classifier observability on real repositories.
+
 ### `screen_refinement_start`
 
 Continues a deferred primary run using the exact preset refinement contract and extension-owned retained candidates. It has its own call guard; an `approval_required` result performs zero refinement classifier calls. On success it starts review from refinement-retained IDs and reports `refinementYield` / `lowYield`.

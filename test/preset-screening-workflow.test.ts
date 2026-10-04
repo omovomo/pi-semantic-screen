@@ -12,9 +12,9 @@ import {
 
 const preset = getPreset("python-exceptions");
 const items: AdapterCandidate[] = [
-  { id: "a.py:1-2", text: "a" },
-  { id: "b.py:3-4", text: "b" },
-  { id: "c.py:5-6", text: "c" },
+  { id: "a.py:1-2", text: "a", source: "a.py", line: 1, column: 1 },
+  { id: "b.py:3-4", text: "b", source: "b.py", line: 3, column: 2 },
+  { id: "c.py:5-6", text: "c", source: "c.py", line: 5, column: 3 },
 ];
 
 function result(overrides: Partial<ScreeningResult> = {}): ScreeningResult {
@@ -122,6 +122,43 @@ test("primary manager classifies with preset contract and starts review from exa
   assert.equal(d.inputs[0].input.question, preset.primary.question);
   assert.deepEqual(d.inputs[0].input.criteria, preset.primary.criteria);
   assert.equal(d.inputs[0].input.threshold, 0.70);
+});
+
+test("primary outcome manifest exposes deterministic bucket reasons and source locations", async () => {
+  const manager = new PresetScreeningWorkflowManager();
+  const d = deps(() => result());
+  const started = await manager.startPrimary({ preset, scope: "my_project/", confirm: true }, d.value);
+  assert.equal(started.status, "ok");
+  assert.ok(started.primaryRunId);
+
+  const drops = manager.primaryManifest({ primaryRunId: started.primaryRunId!, labels: ["DROP"] });
+  assert.equal(drops.status, "ok");
+  assert.equal(drops.total, 3);
+  assert.equal(drops.matched, 1);
+  assert.equal(drops.returned, 1);
+  assert.deepEqual(drops.items[0], {
+    id: "b.py:3-4",
+    source: "b.py",
+    line: 3,
+    column: 2,
+    label: "DROP",
+    keepProbability: 0.1,
+    confidence: 0.9,
+    reason: "keepProbability 0.100000 <= drop threshold 0.300000",
+  });
+
+  const all = manager.primaryManifest({ primaryRunId: started.primaryRunId!, offset: 1, limit: 1 });
+  assert.equal(all.matched, 3);
+  assert.equal(all.returned, 1);
+  assert.equal(all.items[0].label, "DROP");
+});
+
+test("primary manifest fails closed for unknown run ids", () => {
+  const manager = new PresetScreeningWorkflowManager();
+  const manifest = manager.primaryManifest({ primaryRunId: "missing", labels: ["DROP"] });
+  assert.equal(manifest.status, "error");
+  assert.equal(manifest.returned, 0);
+  assert.match(manifest.issues[0] ?? "", /unknown primary run/);
 });
 
 test("approval-required primary never starts review or becomes canonical", async () => {

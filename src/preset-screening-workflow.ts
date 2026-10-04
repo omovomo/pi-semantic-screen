@@ -1,5 +1,5 @@
 import type { AdapterCandidate, AdapterDiscoverResult } from "./adapters/types.ts";
-import type { ClassifierUsageLike, ScreeningInput, ScreeningResult } from "./engine.ts";
+import { DEFAULT_THRESHOLD, type ClassifierUsageLike, type ScreeningInput, type ScreeningResult } from "./engine.ts";
 import { buildScreeningEfficiency, type ScreeningEfficiencyMetrics } from "./metrics.ts";
 import type { ScreeningPreset, ScreeningStagePreset } from "./presets/types.ts";
 import type { ReviewWorkflowProgress, ReviewWorkflowStartResult } from "./review-workflow.ts";
@@ -35,6 +35,35 @@ export interface PrimaryScreeningStartResult {
   reusedInitialization: boolean;
   projectedCalls?: number;
   callLimit?: number;
+  issues: string[];
+}
+
+export type PrimaryOutcomeLabel = "KEEP" | "DROP" | "UNDECIDED" | "WITHHELD" | "ERROR";
+
+export interface PrimaryOutcomeManifestItem {
+  id: string;
+  source?: string;
+  line?: number;
+  column?: number;
+  label: PrimaryOutcomeLabel;
+  keepProbability?: number;
+  confidence?: number;
+  reason: string;
+}
+
+export interface PrimaryOutcomeManifestResult {
+  status: "ok" | "error";
+  primaryRunId: string;
+  preset?: string;
+  scope?: string;
+  threshold?: number;
+  labels: PrimaryOutcomeLabel[];
+  total: number;
+  matched: number;
+  offset: number;
+  limit: number;
+  returned: number;
+  items: PrimaryOutcomeManifestItem[];
   issues: string[];
 }
 
@@ -85,9 +114,57 @@ interface PrimaryRunState {
   provider?: string;
   model?: string;
   retainedItems: AdapterCandidate[];
+  allItems: AdapterCandidate[];
+  primaryResult?: ScreeningResult;
   primary: ScreeningStageSummary;
   review?: ReviewWorkflowStartResult;
   refinement?: ScreeningStageSummary & { refinementYield: number; lowYield: boolean };
+}
+
+function primaryOutcomeItems(
+  state: PrimaryRunState,
+  labels: Set<PrimaryOutcomeLabel>,
+): PrimaryOutcomeManifestItem[] {
+  const threshold = state.preset.primary.threshold ?? DEFAULT_THRESHOLD;
+  const byId = new Map(state.allItems.map((item) => [item.id, item]));
+  const output: PrimaryOutcomeManifestItem[] = [];
+  const append = (
+    id: string,
+    label: PrimaryOutcomeLabel,
+    reason: string,
+    keepProbability?: number,
+    confidence?: number,
+  ) => {
+    if (!labels.has(label)) return;
+    const candidate = byId.get(id);
+    output.push({
+      id,
+      ...(candidate?.source ? { source: candidate.source } : {}),
+      ...(candidate?.line !== undefined ? { line: candidate.line } : {}),
+      ...(candidate?.column !== undefined ? { column: candidate.column } : {}),
+      label,
+      ...(keepProbability !== undefined ? { keepProbability } : {}),
+      ...(confidence !== undefined ? { confidence } : {}),
+      reason,
+    });
+  };
+
+  const result = state.primaryResult;
+  if (!result) return output;
+  for (const item of result.kept) {
+    append(item.id, "KEEP", `keepProbability ${item.probability.toFixed(6)} >= keep threshold ${threshold.toFixed(6)}`, item.probability, item.probability);
+  }
+  for (const item of result.dropped) {
+    const dropThreshold = 1 - threshold;
+    append(item.id, "DROP", `keepProbability ${item.probability.toFixed(6)} <= drop threshold ${dropThreshold.toFixed(6)}`, item.probability, 1 - item.probability);
+  }
+  for (const item of result.undecided) {
+    const dropThreshold = 1 - threshold;
+    append(item.id, "UNDECIDED", `keepProbability ${item.probability.toFixed(6)} is between drop threshold ${dropThreshold.toFixed(6)} and keep threshold ${threshold.toFixed(6)}`, item.probability);
+  }
+  for (const item of result.withheld) append(item.id, "WITHHELD", item.reason);
+  for (const item of result.errors) append(item.id, "ERROR", item.message ? `${item.reason}: ${item.message}` : item.reason);
+  return output;
 }
 
 function stageInput(
@@ -278,6 +355,7 @@ export class PresetScreeningWorkflowManager {
 
     let primary: ScreeningStageSummary;
     let retained: AdapterCandidate[];
+    let primaryResult: ScreeningResult | undefined;
     if (items.length === 0) {
       primary = zeroStageSummary();
       retained = [];
@@ -293,6 +371,7 @@ export class PresetScreeningWorkflowManager {
         signal: request.signal,
       });
       const result = screened.result;
+      primaryResult = result;
       primary = summarize(result, screened.reused, screened.cacheHits ?? 0, screened.cacheMisses ?? items.length);
       if (result.status !== "ok") {
         return {
@@ -321,6 +400,8 @@ export class PresetScreeningWorkflowManager {
       provider: request.provider,
       model: request.model,
       retainedItems: retained,
+      allItems: items,
+      ...(primaryResult ? { primaryResult } : {}),
       primary,
     };
 
@@ -362,6 +443,50 @@ export class PresetScreeningWorkflowManager {
       refinementAvailable: Boolean(request.preset.refinement),
       refinementDeferred: !state.review,
       reusedInitialization: false,
+      issues: [],
+    };
+  }
+
+  primaryManifest(request: {
+    primaryRunId: string;
+    labels?: PrimaryOutcomeLabel[];
+    offset?: number;
+    limit?: number;
+  }): PrimaryOutcomeManifestResult {
+    const state = this.byId.get(request.primaryRunId);
+    const defaultLabels: PrimaryOutcomeLabel[] = ["KEEP", "DROP", "UNDECIDED", "WITHHELD", "ERROR"];
+    const labels = request.labels && request.labels.length > 0 ? [...new Set(request.labels)] : defaultLabels;
+    const offset = request.offset ?? 0;
+    const limit = request.limit ?? 200;
+    if (!state) {
+      return {
+        status: "error",
+        primaryRunId: request.primaryRunId,
+        labels,
+        total: 0,
+        matched: 0,
+        offset,
+        limit,
+        returned: 0,
+        items: [],
+        issues: [`unknown primary run: ${request.primaryRunId}`],
+      };
+    }
+    const items = primaryOutcomeItems(state, new Set(labels));
+    const page = items.slice(offset, offset + limit);
+    return {
+      status: "ok",
+      primaryRunId: state.id,
+      preset: state.preset.id,
+      scope: state.scope,
+      threshold: state.preset.primary.threshold ?? DEFAULT_THRESHOLD,
+      labels,
+      total: state.allItems.length,
+      matched: items.length,
+      offset,
+      limit,
+      returned: page.length,
+      items: page,
       issues: [],
     };
   }
