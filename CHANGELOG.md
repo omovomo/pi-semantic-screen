@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.2 - 2026-10-04
+
+- Add bounded optional `dropHints` to compact declarative presets so use cases can improve conservative primary negative filtering without expanding into a full classifier contract.
+- Normalize `dropHints` into the negative primary criterion with explicit fail-closed wording: hints are context, never deterministic DROP rules, and ambiguity remains `UNDECIDED`.
+- Include normalized hints in the classifier contract fingerprint automatically, so changing hints invalidates affected semantic cache entries.
+- Add two concise hints to the shipped `js-ts-silent-fallbacks` proof preset for explicit failure/rethrow and cleanup/telemetry/retry/UI-only non-fallback behavior.
+- Keep 0.7.1 canonical rediscovery/per-candidate process-local cache behavior unchanged and keep `python-exceptions` feature-frozen.
+
 ## 0.7.1 - 2026-10-04
 
 - Make canonical primary runs rediscover candidates on every `screen_primary_start`; workflow-level reuse can no longer hide source edits.

@@ -100,6 +100,8 @@ Providers report facts. They must not decide whether those facts are semanticall
 
 This is enough to prove a second meaningful JS/TS use case (`js-ts-silent-fallbacks`) without changing extension TypeScript for that use case.
 
+Compact presets may optionally add bounded `dropHints`. Normalization appends them to the negative primary criterion with an explicit guard that hints are not rules and ambiguity remains `UNDECIDED`. This improves classifier guidance without moving semantic disposition logic into discovery/evidence extraction.
+
 The provider does not claim AST or call-graph facts. If an audit requires exact symbol flow, callers/callees, language-specific parse trees, or structured control-flow, that remains an advanced provider capability until a small cross-language primitive is justified by multiple use cases.
 
 ## Canonical preset workflow

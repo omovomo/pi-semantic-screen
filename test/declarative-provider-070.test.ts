@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { getPreset } from "../src/presets/registry.ts";
+import { fingerprintClassifierContract } from "../src/cache.ts";
 import { parseDeclarativePreset, SIMPLE_PRESET_DEFAULTS_VERSION } from "../src/presets/declarative.ts";
 import { registerEvidenceProvider, resolvePresetEvidenceProvider } from "../src/providers/registry.ts";
 import { createGenericSourceProvider } from "../src/providers/generic-source.ts";
@@ -156,6 +157,62 @@ test("0.7.1 compact preset supports explicit overrides without requiring advance
   assert.equal(preset.primary.criteria.true, "Evidence plausibly hides the required failure.");
   assert.equal(preset.evidence.maxTokens, 4000);
   assert.equal(preset.evidence.maxItems, 60);
+});
+
+
+
+test("0.7.2 compact dropHints enrich only the negative classifier criterion and fingerprint", async () => {
+  const base = parseDeclarativePreset({
+    id: "hint-base",
+    source: { include: ["**/*.ts"], match: ["catch"] },
+    question: "Could this path hide a required failure?",
+  }, "hint-base-test");
+  const hinted = parseDeclarativePreset({
+    id: "hinted",
+    source: { include: ["**/*.ts"], match: ["catch"] },
+    question: "Could this path hide a required failure?",
+    dropHints: [
+      "the handler explicitly rethrows or returns an explicit failure result",
+      "the handler performs only cleanup or telemetry without substituting a valid result",
+    ],
+  }, "hinted-test");
+
+  assert.equal(hinted.primary.criteria.true, base.primary.criteria.true);
+  assert.match(hinted.primary.criteria.false, /explicitly rethrows or returns an explicit failure result/);
+  assert.match(hinted.primary.criteria.false, /cleanup or telemetry/);
+  assert.match(hinted.primary.criteria.false, /Hints are not rules/);
+  assert.match(hinted.primary.criteria.false, /ambiguity remains UNDECIDED/);
+
+  const identity = { provider: "test", id: "classifier", implementation: "test-v1" };
+  const baseFingerprint = await fingerprintClassifierContract({
+    items: [],
+    question: base.primary.question,
+    criteria: base.primary.criteria,
+    threshold: base.primary.threshold,
+  }, identity);
+  const hintedFingerprint = await fingerprintClassifierContract({
+    items: [],
+    question: hinted.primary.question,
+    criteria: hinted.primary.criteria,
+    threshold: hinted.primary.threshold,
+  }, identity);
+  assert.notEqual(hintedFingerprint, baseFingerprint);
+});
+
+test("0.7.2 compact dropHints stay bounded", () => {
+  assert.throws(() => parseDeclarativePreset({
+    id: "too-many-hints",
+    source: { include: ["**/*.ts"], match: ["catch"] },
+    question: "Could this path hide a required failure?",
+    dropHints: Array.from({ length: 9 }, (_, index) => `hint ${index}`),
+  }, "too-many-hints-test"), /at most 8 hints/);
+
+  assert.throws(() => parseDeclarativePreset({
+    id: "long-hint",
+    source: { include: ["**/*.ts"], match: ["catch"] },
+    question: "Could this path hide a required failure?",
+    dropHints: ["x".repeat(241)],
+  }, "long-hint-test"), /at most 240 characters/);
 });
 
 test("0.7.1 compact preset rejects ambiguous mixing with advanced provider/primary form", () => {

@@ -2,12 +2,33 @@
   "id": "js-ts-silent-fallbacks",
   "label": "JS/TS silent fallback audit",
   "source": {
-    "include": ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.tsx"],
-    "exclude": ["**/*.d.ts", "**/*.min.js"],
+    "include": [
+      "**/*.js",
+      "**/*.mjs",
+      "**/*.cjs",
+      "**/*.ts",
+      "**/*.tsx"
+    ],
+    "exclude": [
+      "**/*.d.ts",
+      "**/*.min.js"
+    ],
     "match": [
-      { "id": "catch-clause", "label": "catch clause", "regex": "\\bcatch\\s*(?:\\([^)]*\\))?\\s*\\{" },
-      { "id": "promise-catch", "label": "Promise .catch handler", "regex": "\\.catch\\s*\\(" }
+      {
+        "id": "catch-clause",
+        "label": "catch clause",
+        "regex": "\\bcatch\\s*(?:\\([^)]*\\))?\\s*\\{"
+      },
+      {
+        "id": "promise-catch",
+        "label": "Promise .catch handler",
+        "regex": "\\.catch\\s*\\("
+      }
     ]
   },
-  "question": "Can this failure handler plausibly turn a meaningful operation failure into apparently valid, default, empty, fallback, or silently incomplete behavior?"
+  "question": "Can this failure handler plausibly turn a meaningful operation failure into apparently valid, default, empty, fallback, or silently incomplete behavior?",
+  "dropHints": [
+    "the handler explicitly rethrows, rejects, or returns an explicit failure/error result instead of converting failure into an apparently valid fallback",
+    "the handler performs only cleanup, telemetry/logging, retry/recovery propagation, or UI notification without substituting a valid/default result"
+  ]
 }

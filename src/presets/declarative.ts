@@ -70,6 +70,16 @@ function optionalStringArray(value: unknown, where: string): string[] | undefine
   return value === undefined ? undefined : stringArray(value, where);
 }
 
+function simpleDropHints(value: unknown, where: string): string[] {
+  if (value === undefined) return [];
+  const hints = stringArray(value, where);
+  if (hints.length > 8) throw new Error(`${where} must contain at most 8 hints`);
+  for (const [index, hint] of hints.entries()) {
+    if (hint.length > 240) throw new Error(`${where}[${index}] must be at most 240 characters`);
+  }
+  return hints;
+}
+
 function genericSourceConfig(value: unknown, where: string): GenericSourceProviderConfig {
   const input = object(value, where);
   if (!Array.isArray(input.patterns) || input.patterns.length === 0) throw new Error(`${where}.patterns must be non-empty`);
@@ -184,13 +194,17 @@ function parseSimplePreset(input: Record<string, unknown>, source: string): Scre
   const classifier = input.classifier === undefined ? {} : object(input.classifier, `${source}.classifier`);
   const review = input.review === undefined ? {} : object(input.review, `${source}.review`);
   const config = simpleSource(input.source, `${source}.source`);
+  const dropHints = simpleDropHints(input.dropHints, `${source}.dropHints`);
   const threshold = classifier.threshold === undefined
     ? SIMPLE_PRIMARY_THRESHOLD
     : number(classifier.threshold, `${source}.classifier.threshold`, 0.5, 1);
   const keepWhen = optionalString(classifier.keepWhen, `${source}.classifier.keepWhen`) ??
     "The bounded candidate evidence provides concrete support for answering the semantic question YES.";
-  const dropWhen = optionalString(classifier.dropWhen, `${source}.classifier.dropWhen`) ??
-    "The bounded candidate evidence clearly supports answering the semantic question NO.";
+  const defaultDropWhen = "The bounded candidate evidence clearly supports answering the semantic question NO.";
+  const hintClause = dropHints.length === 0
+    ? ""
+    : ` Evidence patterns that may support NO when explicitly present and semantically relevant: ${dropHints.map((hint, index) => `${index + 1}) ${hint}`).join("; ")}. Hints are not rules: a hint match alone is not sufficient for DROP, and ambiguity remains UNDECIDED.`;
+  const dropWhen = optionalString(classifier.dropWhen, `${source}.classifier.dropWhen`) ?? `${defaultDropWhen}${hintClause}`;
   const defaultInstructions = `Semantic question: ${question}\nJudge only the bounded emitted evidence. Do not infer hidden facts, callers, or dataflow that are not shown. Missing or ambiguous context is INSUFFICIENT_EVIDENCE.`;
   const defaultConfirm = `CONFIRM only when the bounded evidence establishes a YES answer to this semantic question: ${question}`;
   const defaultReject = "Use a terminal non-finding disposition only when the bounded evidence establishes that the semantic question is not satisfied. Use INSUFFICIENT_EVIDENCE when neither conclusion is established.";

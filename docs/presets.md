@@ -1,6 +1,6 @@
 # Presets
 
-Presets own semantic policy and provider selection. 0.7.1 supports compiled builtin presets plus two declarative JSON forms:
+Presets own semantic policy and provider selection. 0.7.2 supports compiled builtin presets plus two declarative JSON forms:
 
 - **simple** — the normal `generic-source` path: describe where candidates come from and ask one semantic question;
 - **advanced** — explicit provider/classifier/review/evidence configuration for use cases that need overrides or an advanced provider.
@@ -33,6 +33,22 @@ For most bounded source audits, this is sufficient:
   "question": "Can a required configuration failure become apparently valid default behavior?"
 }
 ```
+
+When the generic NO criterion is too conservative, the compact form may add a few bounded `dropHints` instead of replacing the full classifier contract:
+
+```json
+{
+  "id": "required-config-defaults",
+  "source": { "include": ["**/*.ts"], "match": ["catch"] },
+  "question": "Can a required configuration failure become apparently valid default behavior?",
+  "dropHints": [
+    "the handler explicitly rethrows or returns an explicit failure result",
+    "the handler performs only cleanup, telemetry, retry, or UI notification without substituting a valid result"
+  ]
+}
+```
+
+`dropHints` are classifier context, not deterministic rules. A matching phrase or shape alone never authorizes DROP; bounded evidence must still clearly establish a NO answer, and ambiguity remains `UNDECIDED`. Hints are limited to 8 entries of at most 240 characters each. Because they are normalized into `primary.criteria.false`, changing them changes the classifier-contract fingerprint and invalidates cached primary results fail-closed.
 
 `source.match` accepts either regex strings or objects when stable IDs/labels/flags are useful:
 
@@ -77,7 +93,7 @@ Optional simple overrides are narrow and explicit:
 }
 ```
 
-`label`, `description`, `classifier`, `review`, and evidence-budget fields are optional. A simple preset may not mix `source/question` with advanced `provider/primary/refinement`; ambiguous mixed forms fail closed.
+`label`, `description`, `dropHints`, `classifier`, `review`, and evidence-budget fields are optional. A simple preset may not mix `source/question` with advanced `provider/primary/refinement`; ambiguous mixed forms fail closed.
 
 ## Advanced preset — compatibility / escape hatch
 

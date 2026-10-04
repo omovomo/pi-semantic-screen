@@ -2,7 +2,7 @@
 
 Classifier-first semantic screening for Pi: deterministic discovery feeds a cheap primary classifier, and expensive semantic reasoning runs only on retained candidates.
 
-Version **0.7.1** makes the 0.7 architecture practical in canonical runs: every primary start rediscovers the source snapshot, unchanged candidates reuse the in-session classifier cache independently, and declarative use cases can use a compact `source + question` preset form with deterministic engine-owned defaults. `python-exceptions` remains feature-frozen.
+Version **0.7.2** keeps the 0.7.1 canonical cache behavior and adds bounded optional `dropHints` to compact presets, so a use case can improve cheap negative filtering without expanding back into a full classifier contract. `python-exceptions` remains feature-frozen.
 
 ## Architecture at a glance
 
@@ -62,7 +62,7 @@ pi -e ./pi-semantic-screen
 GitHub tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.7.1
+pi install git:github.com/<owner>/pi-semantic-screen@v0.7.2
 ```
 
 See [Git installation and repository setup](docs/git-install.md).
@@ -88,7 +88,7 @@ Declarative JS/TS proof use case (no JS-specific extension code):
 /screen-use js-ts-silent-fallbacks my_project/
 ```
 
-Add project-local use cases as `.pi-semantic-screen/presets/<id>.json`; no package rebuild is needed when the existing provider capabilities are sufficient. Most `generic-source` audits need only `id`, `source.include`, `source.match`, and `question`; see [Presets](docs/presets.md).
+Add project-local use cases as `.pi-semantic-screen/presets/<id>.json`; no package rebuild is needed when the existing provider capabilities are sufficient. Most `generic-source` audits need only `id`, `source.include`, `source.match`, and `question`. Add a few `dropHints` only when the generic NO criterion is too conservative; see [Presets](docs/presets.md).
 
 Optional explicit refinement:
 
