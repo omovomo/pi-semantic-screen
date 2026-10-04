@@ -1,51 +1,49 @@
 # pi-semantic-screen
 
-Adapter-driven semantic screening for Pi: cheaply classify many candidates, then perform bounded deep review over deterministic evidence.
+Classifier-first semantic screening for Pi: deterministic discovery feeds a cheap primary classifier, and expensive semantic reasoning runs only on retained candidates.
 
-Version **0.6.3** freezes the built-in Python exception adapter after a de-specialization pass. The adapter remains Python-specific but project/domain-agnostic: structured-result propagation, sentinel handling, bounded fan-out, handler exit topology, persistence sinks, and interprocedural bindings are inferred structurally rather than from application vocabulary. Extension-owned preset screening/review state, the two generic call-edge bound, and the 7200-token packet budget remain unchanged.
+Version **0.7.0** adds declarative JSON use cases, a versioned evidence-provider boundary, per-candidate classifier caching, first-class efficiency metrics, and a generic bounded source provider. `python-exceptions` remains feature-frozen as the reference advanced provider; no application-specific Python semantics were added.
 
 ## Architecture at a glance
 
 ```text
-screen_preset + count discovery + screen_preflight
-                    |
-                    v
-screen_primary_start                              exact preset primary contract
-      |                                           retained IDs owned by extension
-      +-- optional defer --> screen_refinement_start
-                    |
-                    v
-extension-owned ReviewWorkflowManager
-                    |
-                    v
-screen_review_next  --> evidence + reviewContract
-                    |
-                    v
-parent model       --> {id, disposition, rationale} × N
-                    |
-                    v
-screen_review_commit                              atomic state transition
-                    |
-                    +--> next packet / complete / complete-with-blocked
+large candidate universe
+        |
+        v
+deterministic provider discovery
+        |
+        v
+PRIMARY CLASSIFIER  <---- per-candidate cache
+   |        |
+   |        +---- DROP --------------------> stop
+   |
+   +------------- retained
+                     |
+                     v
+             semantic review
+             standard -> expanded
+                     |
+                     v
+             final disposition
 ```
 
 Use cases stay small:
 
 - semantic policy belongs in a **preset**;
-- deterministic source discovery/evidence belongs in an **adapter**;
+- deterministic source discovery/evidence belongs in an **evidence provider**;
 - canonical preset screening contracts and retained IDs stay in extension-owned screening state;
 - `screen_batch` remains the generic ad-hoc classifier primitive;
 - review accounting/state ownership stays in the extension.
 
-Do not create a new large `/screen-foo` prompt for every use case. If an existing adapter fits, add a preset. Only genuinely new source semantics require a new adapter.
+Do not create a new large `/screen-foo` prompt for every use case. Prefer a declarative preset. Use `generic-source` for bounded text/source evidence; only genuinely richer parse/dataflow semantics require an advanced provider.
 
-See [Architecture](docs/architecture.md), [Adapters](docs/adapters.md), and [Presets](docs/presets.md).
+See [Architecture](docs/architecture.md), [Evidence providers](docs/adapters.md), and [Presets](docs/presets.md).
 
 ## Requirements
 
 - Node.js 22.19+.
 - Pi with Code Mode and a configured classifier model for `screen_batch`.
-- Python 3.9+ only for the built-in `python-exceptions` adapter. No third-party Python packages are required.
+- Python 3.9+ only for the built-in `python-exceptions` provider. No third-party Python packages are required.
 
 ## Install
 
@@ -64,7 +62,7 @@ pi -e ./pi-semantic-screen
 GitHub tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.6.3
+pi install git:github.com/<owner>/pi-semantic-screen@v0.7.0
 ```
 
 See [Git installation and repository setup](docs/git-install.md).
@@ -82,6 +80,15 @@ Equivalent generic command:
 ```text
 /screen-use python-exceptions my_project/
 ```
+
+
+Declarative JS/TS proof use case (no JS-specific extension code):
+
+```text
+/screen-use js-ts-silent-fallbacks my_project/
+```
+
+Add project-local use cases as `.pi-semantic-screen/presets/<id>.json`; no package rebuild is needed when the existing provider capabilities are sufficient.
 
 Optional explicit refinement:
 
@@ -103,11 +110,11 @@ Continue an incomplete semantic review:
 
 ### `screen_preset`
 
-Lists presets or returns one preset's adapter, classifier stages, review policy, and evidence limits.
+Lists presets or returns one preset's evidence-provider selection, classifier stages, review policy, and evidence limits. Declarative presets can be resolved from project/config directories or an explicit JSON path.
 
 ### `screen_discover`
 
-Deterministic adapter discovery:
+Deterministic provider discovery:
 
 ```ts
 await tools.screen_discover({
@@ -139,7 +146,7 @@ Canonical preset initialization. The caller supplies only preset/scope plus guar
 4. computes `kept + undecided + withheld + errors`;
 5. creates the review workflow atomically.
 
-The first successful `preset+scope` initialization is canonical for the active Pi session unless `rescreen:true` is explicit. Use `deferReview:true` only for an explicitly requested refinement path.
+The first successful initialization for the same preset definition, scope, and resolved classifier identity is canonical for the active Pi session unless `rescreen:true` is explicit. A preset-contract or classifier-identity change starts a new initialization. Use `deferReview:true` only for an explicitly requested refinement path.
 
 ### `screen_refinement_start`
 
@@ -161,7 +168,7 @@ Every input ID ends in exactly one bucket:
 kept | dropped | undecided | withheld | errors
 ```
 
-Errors and aborts never become `dropped`. Successful identical runs are reused from a small process-local result cache; `rescreen:true` explicitly bypasses reuse.
+Errors and aborts never become `dropped`. 0.7 caches successful semantic outcomes per candidate. Keys include the exact classifier contract, normalized candidate ID/text, and the resolved classifier model/implementation identity; a changed candidate is recomputed independently and `rescreen:true` bypasses reuse.
 
 ### `screen_review_start`
 
@@ -280,7 +287,7 @@ For `python-exceptions`, normalization is intentionally narrow:
 - silently dropping a malformed authoritative lot/transaction/record from a normal returned core object is **not** expected normalization unless omission is explicitly allowed and surfaced;
 - failed read/parse of authoritative persisted domain state followed by returning an empty/default domain object as normal usable state is **CONFIRM**, not `EXPECTED_NORMALIZATION`, unless that defaulting is explicitly part of the outward contract and surfaced.
 
-## Built-in `python-exceptions` adapter
+## Built-in `python-exceptions` reference provider
 
 Candidate identity:
 
@@ -304,7 +311,7 @@ Candidate/evidence data includes:
 - wider bounded caller context for unresolved cases;
 - bounded function-tail context as a final generic fallback.
 
-The adapter is bundled deterministic Python, not model-generated code. It fails closed on unreadable/unparseable sources and stale IDs.
+The provider is bundled deterministic Python, not model-generated code. It fails closed on unreadable/unparseable sources and stale IDs.
 
 ## Classifier selection
 
@@ -335,13 +342,13 @@ Context compaction defaults to host/Pi context management. `PI_SEMANTIC_SCREEN_C
 
 When every classifier call reports usage, `screen_primary_start`, `screen_refinement_start`, and low-level `screen_batch` publish exact classifier token/cost usage for calls they actually execute. If any call omits usage, accounting is marked incomplete rather than fabricated.
 
-Process-local result reuse reports zero new classifier usage.
+Process-local classification reuse reports zero new classifier calls for cache hits. Primary results also expose `discovered`, `primaryEvaluated`, cache hits/misses, reduction/review-avoidance rates, and classifier token/cost fields when the runtime reports them. Review progress exposes standard/expanded attempt/resolution metrics; review token/cost figures are not fabricated.
 
 ## Security and egress
 
 Remote classifier egress is limited to candidate text plus semantic question/criteria after conservative redaction. In canonical preset flows those semantic fields are loaded from the local preset registry inside the extension; the model does not supply them.
 
-Discovery, preset workflow state, evidence extraction, review-state transitions, and review commit are local. The Python adapter does not use the network. Active review evidence may be retained temporarily in process memory only while a packet is pending; it is dropped after commit.
+Discovery, preset workflow state, evidence extraction, review-state transitions, and review commit are local. The Python provider and generic-source provider do not use the network. Active review evidence may be retained temporarily in process memory only while a packet is pending; it is dropped after commit.
 
 See [SECURITY.md](SECURITY.md).
 
@@ -351,14 +358,18 @@ See [SECURITY.md](SECURITY.md).
 extensions/screen.ts          Pi tools and runtime integration
 src/engine.ts                 generic classifier engine
 src/preflight.ts              zero-call guard
-src/cache.ts                  process-local screening result cache
+src/cache.ts                  per-candidate semantic classification cache
 src/evidence-budget.ts        token-bounded evidence transport
 src/review-contract.ts        disposition vocabulary / preset contract
 src/review-apply.ts           pure exact disposition validation
 src/preset-screening-workflow.ts extension-owned primary/refinement state
 src/review-workflow.ts        extension-owned review state machine
-src/adapters/                 deterministic source adapters
-src/presets/                  semantic policy presets
+src/providers/                stable evidence-provider API + generic-source
+src/adapters/                 compatibility layer + Python reference provider
+src/presets/                  semantic policy + declarative preset loader
+presets/                      shipped declarative use cases
+src/metrics.ts                classifier-first efficiency metrics
+src/stability.ts              generic cross-run semantic comparison
 skills/ask/SKILL.md           generic orchestration rules
 prompts/                      short user commands/aliases
 test/                         unit/contract/integration tests

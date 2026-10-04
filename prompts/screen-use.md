@@ -1,5 +1,5 @@
 ---
-description: Run a registered semantic-screen preset through its deterministic adapter
+description: Run a registered semantic-screen preset through its deterministic provider
 argument-hint: "<preset> [scope] [--refine]"
 ---
 

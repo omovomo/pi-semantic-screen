@@ -1,112 +1,75 @@
-# Adapters
+# Evidence providers and adapters
 
-Adapters turn a source domain into two deterministic operations: candidate discovery and review evidence.
-
-## Contract
-
-See `src/adapters/types.ts`.
-
-### Discovery
+0.7 names the core boundary **EvidenceProvider**. The historical `ScreeningAdapter` types remain compatibility aliases, so existing advanced adapters do not need an immediate package split.
 
 ```ts
-discover({
-  scope,
-  mode: "count" | "candidates"
-})
+interface EvidenceProvider {
+  apiVersion: 1;
+  id: string;
+  label: string;
+  discover(request): Promise<EvidenceDiscoverResult>;
+  evidence(request): Promise<EvidenceResult>;
+}
 ```
 
-`count` should be cheap and must not build or return rich candidate text when the adapter can avoid it. This mode exists so `screen_preflight` can enforce the classifier-call guard before a large payload is created.
+See `src/providers/types.ts`. Compatibility exports remain in `src/adapters/types.ts`; result objects still carry the historical `adapter` wire field for backward compatibility.
 
-`candidates` returns stable `{id,text}` items. Canonical preset flows consume them internally in `screen_primary_start`; low-level/custom callers may still pass them to `screen_batch`.
+## Responsibilities
 
-If deterministic discovery is incomplete because a source cannot be read or parsed, return `status:"error"`; do not silently omit that source.
+A provider may:
 
-### Evidence
+- deterministically discover candidate IDs/text;
+- return count-only discovery cheaply when possible;
+- map stable IDs back to exact source evidence;
+- provide bounded standard/expanded evidence;
+- report parse/source/identity ambiguity as an error.
 
-```ts
-evidence({
-  scope,
-  ids,
-  maxItems,
-  maxSources,
-  maxChars,
-  detail: "standard" | "expanded"
-})
-```
+A provider must not decide whether evidence satisfies the preset's business/semantic question. It emits facts; the classifier/reviewer assigns meaning.
 
-Return:
+## Discovery
 
-- `packetIds`: exact IDs actually represented by evidence;
-- `items`: evidence records in the same order;
-- `sourceCount` and `chars`;
-- `status:"error"` on stale/unresolvable targets or source failures;
-- expanded detail adds targeted data-flow hints (`tracked`, `pre_try_writes`, `post_handler_reads`), post-handler validation/control hints, core calls using tracked values, persistence/save calls, exact sentinel/default handling (including direct fallback-return origins and mutable-container suppression), bounded exact caller/constructor/downstream-consumer terminal guards, value-directed interprocedural flow, and wider bounded caller context; generic function-tail text remains a bounded fallback for IDs unresolved at standard detail.
+`discover({mode:"count"})` supports preflight without classifier calls. `discover({mode:"candidates"})` returns stable `{id,text}` items.
 
-The caller must never infer packet membership from the requested number of IDs. After adapter extraction, the extension may further trim complete items to the preset `maxTokens` transport budget and recompute exact packet metadata. This is normal bounded pagination: callers must review the returned subset and continue with the remaining IDs rather than treating `requested > packetIds.length` as an error.
+Candidate text should be compact and self-contained enough for the cheap classifier. It should not contain expensive evidence that belongs only in semantic review.
 
-## Adding an adapter
+## Evidence
 
-1. Create `src/adapters/<name>.ts` implementing `ScreeningAdapter`.
-2. Put any bundled helper scripts beside it so git/npm packages keep them together.
-3. Register the adapter in `src/adapters/registry.ts`.
-4. Add tests that prove:
-   - stable count/discovery;
-   - stable IDs;
-   - exact evidence `packetIds` under caps;
-   - fail-closed source errors;
-   - abort behavior if the adapter performs long-running work.
-5. Add one or more presets that reference the adapter.
+`evidence()` receives exact candidate IDs and returns exact `packetIds`, source count, characters, and item evidence. Returning fewer items because of configured item/source/character bounds is normal. The extension then applies the separate token budget at whole-item boundaries.
 
-Do **not** add parser implementation details to a prompt template.
+Unknown/stale IDs fail closed.
 
-## Python interpreter selection
+## Generic-source provider
 
-The built-in `python-exceptions` adapter needs Python 3.9+ and tries:
+`generic-source` is the adapter-light MVP. It is instantiated by a declarative preset and supports:
 
-Windows:
+- source include/exclude globs;
+- multiple trusted local regex discovery patterns;
+- deterministic source location and candidate IDs;
+- bounded candidate line windows;
+- bounded standard/expanded evidence windows;
+- hard file/file-size/candidate limits;
+- fail-closed errors when an included source exceeds the configured per-file bound.
 
-1. `python`
-2. `py -3`
-3. `python3`
+It deliberately does **not** claim AST, dataflow, caller/callee, symbol-read/write, or mutation semantics. Those facts require a provider that can establish them correctly.
 
-Unix-like systems:
+The shipped `presets/js-ts-silent-fallbacks.json` demonstrates catch-clause and Promise `.catch(...)` screening without a JS-specific core adapter.
 
-1. `python3`
-2. `python`
+## Advanced provider registration
 
-Override the executable path with:
+Builtin advanced providers are registered through `src/providers/registry.ts`. `registerEvidenceProvider()` validates API version, identity, and required capabilities at runtime; API version 1 defines the internal boundary needed for future external loading.
 
-```text
-PI_SEMANTIC_SCREEN_PYTHON=/path/to/python
-```
+0.7 does not automatically import arbitrary npm/local modules. External loading remains a packaging/trust concern, not a reason to couple provider-specific semantics back into the screening engine.
 
-The adapter forces UTF-8 I/O and uses JSON over stdin/stdout. No shell is required.
+## Python reference provider freeze
 
-## Adapter design rules
+`python-exceptions` is the reference advanced provider and remains feature-frozen after 0.6.3 except for:
 
-- Read-only by default.
-- Deterministic for the same source snapshot and request.
-- Stable IDs that can be rehydrated later.
-- No classifier or LLM calls inside adapters.
-- No hidden fuzzy matching that can silently change candidate identity.
-- Fail closed on missing source, parser failures, or stale IDs.
-- Keep rich source payloads bounded and avoid duplicating source context inside one evidence item.
+- correctness fixes;
+- parser/runtime compatibility;
+- boundedness/performance fixes;
+- genuine generic Python-language bugs;
+- fail-closed correctness bugs.
 
-## Built-in Python adapter freeze boundary
+Do not add audited-application class/function names, domain-specific business semantics, project-specific enum semantics, or deeper tracing justified only by one repository.
 
-The built-in `python-exceptions` adapter is feature-frozen after 0.6.3 except for correctness, compatibility, boundedness, and parser/runtime fixes.
-
-Its responsibility is structural Python evidence only:
-
-- `try`/`except` discovery and stable handler identity;
-- assignments, mutations, control transfer, returns, raises, and loop omission;
-- exact local/caller/callee argument bindings;
-- structured-result constructor/field propagation;
-- sentinel/default origin and explicit consumers;
-- bounded returned-object fan-out;
-- persistence/core-call sinks and handler exit topology;
-- fail-closed ambiguity (`unknown` / insufficient evidence) rather than domain inference.
-
-Do not add application vocabulary or semantic rules for a particular project, product, data model, business domain, function/class name, enum value, or provider. If a proposed rule needs terms from the audited application to describe why it is valid, keep that interpretation in the preset/reviewer layer or use the application only as an external regression corpus.
-
-New capabilities should normally be proven by a second adapter or by a generic adapter/core abstraction rather than by deepening `python-exceptions` for one codebase.
+Python 3.9+ is required only for this provider. It uses framed JSON over local stdin/stdout and no third-party Python packages.

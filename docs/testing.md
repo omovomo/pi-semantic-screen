@@ -25,9 +25,11 @@ npm run check
 The suite includes:
 
 - classifier bucket/accounting/fail-closed behavior;
-- redaction, abort, concurrency and process-local classifier-result reuse;
+- redaction, abort, concurrency and per-candidate classifier-result reuse/invalidation;
 - preflight approval guard;
-- adapter deterministic discovery/evidence and stale/syntax failures;
+- evidence-provider deterministic discovery/evidence, API-version validation, bounded-source failures, and stale/syntax failures;
+- declarative preset loading and the adapterless JS/TS proof use case;
+- classifier-first efficiency metrics and honest usage accounting;
 - evidence token bounding and review-contract overhead;
 - exact review disposition validation;
 - extension-owned review workflow transitions;
@@ -35,7 +37,8 @@ The suite includes:
 - stale packet commit rejection;
 - standard-insufficient -> expanded priority;
 - expanded-insufficient -> blocked quarantine without global stop;
-- terminal findings/blocked/disposition accounting;
+- terminal findings/blocked/disposition accounting plus standard/expanded efficiency metrics;
+- generic semantic-stability comparison;
 - prompt/skill contract tests preventing model-owned preset-contract/retained-ID/review-state reconstruction;
 - package metadata and tool exposure.
 

@@ -33,6 +33,13 @@ export interface ReviewWorkflowProgress {
   reviewableRemaining: number;
   confirmed: number;
   unreviewed: number;
+  standardReviewed: number;
+  standardResolved: number;
+  expandedAttempted: number;
+  expandedResolved: number;
+  expandedBlocked: number;
+  expansionRate: number;
+  expandedResolutionRate: number;
   resumeAvailable: boolean;
 }
 
@@ -73,6 +80,7 @@ export interface ReviewWorkflowCommitResult {
 }
 
 export type ReviewPacketBuilder = (request: {
+  workflowId: string;
   preset: string;
   scope: string;
   ids: string[];
@@ -98,6 +106,11 @@ interface ReviewWorkflowState {
   blockedEvidence: Map<string, string>;
   findings: Map<string, string>;
   dispositionCounts: Record<ReviewDispositionId, number>;
+  standardReviewed: number;
+  standardResolved: number;
+  expandedAttempted: number;
+  expandedResolved: number;
+  expandedBlocked: number;
   pending?: PendingPacket;
   nextPacketSequence: number;
 }
@@ -160,6 +173,11 @@ export class ReviewWorkflowManager {
       blockedEvidence: new Map(),
       findings: new Map(),
       dispositionCounts: emptyDispositionCounts(),
+      standardReviewed: 0,
+      standardResolved: 0,
+      expandedAttempted: 0,
+      expandedResolved: 0,
+      expandedBlocked: 0,
       nextPacketSequence: 1,
     };
     this.workflows.set(workflowId, state);
@@ -199,6 +217,7 @@ export class ReviewWorkflowManager {
 
     const requestedIds = candidates.slice(0, state.targetItems);
     const packet = await buildPacket({
+      workflowId: state.id,
       preset: state.preset,
       scope: state.scope,
       ids: requestedIds,
@@ -306,6 +325,14 @@ export class ReviewWorkflowManager {
     for (const disposition of REVIEW_DISPOSITION_IDS) {
       state.dispositionCounts[disposition] += applied.dispositionCounts[disposition];
     }
+    if (pending.detail === "standard") {
+      state.standardReviewed += pending.packet.packetIds.length;
+      state.standardResolved += applied.reviewedIds.length;
+    } else {
+      state.expandedAttempted += pending.packet.packetIds.length;
+      state.expandedResolved += applied.reviewedIds.length;
+      state.expandedBlocked += applied.blockedEvidence.length;
+    }
     state.pending = undefined;
 
     const terminal = this.isTerminal(state);
@@ -352,6 +379,13 @@ export class ReviewWorkflowManager {
       reviewableRemaining,
       confirmed: state.findings.size,
       unreviewed: state.reviewTargetIds.length - state.reviewedIds.size,
+      standardReviewed: state.standardReviewed,
+      standardResolved: state.standardResolved,
+      expandedAttempted: state.expandedAttempted,
+      expandedResolved: state.expandedResolved,
+      expandedBlocked: state.expandedBlocked,
+      expansionRate: state.reviewTargetIds.length > 0 ? state.expandedAttempted / state.reviewTargetIds.length : 0,
+      expandedResolutionRate: state.expandedAttempted > 0 ? state.expandedResolved / state.expandedAttempted : 0,
       resumeAvailable: actionable,
     };
   }

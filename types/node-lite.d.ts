@@ -30,3 +30,27 @@ declare module "node:child_process" {
 declare module "node:url" {
   export function fileURLToPath(url: URL): string;
 }
+
+declare module "node:fs" {
+  export function readFileSync(path: string, encoding: string): string;
+  export function existsSync(path: string): boolean;
+  export function readdirSync(path: string): string[];
+}
+
+declare module "node:fs/promises" {
+  export interface Dirent {
+    name: string;
+    isDirectory(): boolean;
+    isFile(): boolean;
+  }
+  export function readdir(path: string, options: { withFileTypes: true }): Promise<Dirent[]>;
+  export function readFile(path: string, encoding: string): Promise<string>;
+  export function stat(path: string): Promise<{ isDirectory(): boolean; size: number }>;
+}
+
+declare module "node:path" {
+  export const sep: string;
+  export function resolve(...paths: string[]): string;
+  export function relative(from: string, to: string): string;
+  export function join(...paths: string[]): string;
+}

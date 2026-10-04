@@ -1,3 +1,21 @@
+# Changelog
+
+## 0.7.0 - 2026-10-04
+
+- Re-center the package as a classifier-first semantic screening engine: canonical primary results now expose first-class reduction, review-avoidance, classifier-work, and cache metrics.
+- Add versioned `EvidenceProvider` API v1 and route `python-exceptions` through the same provider boundary; historical adapter exports remain compatibility aliases.
+- Validate provider registration against runtime API-version/identity/capability requirements, leaving external module loading as a separate future trust/packaging layer.
+- Add declarative JSON preset loading from explicit paths, project `.pi-semantic-screen/presets`, `PI_SEMANTIC_SCREEN_PRESET_DIR`, and shipped presets.
+- Add bounded `generic-source` provider (globs + regex discovery + candidate/standard/expanded source windows) and ship `js-ts-silent-fallbacks` as a second meaningful use case requiring no extension-code semantics.
+- Keep declarative discovery fail-closed under bounds: an included source above `maxFileBytes` is an explicit provider error, never a silent omission.
+- Add per-candidate classification cache keyed by semantic classifier contract, normalized candidate fingerprint, and resolved classifier model/implementation identity. Changed candidates are recomputed independently; contract/model changes invalidate fail-closed.
+- Keep review dispositions uncached until reviewer identity/context can be represented safely; standard and expanded review remain explicitly separate future cache domains.
+- Add review efficiency accounting for standard reviewed/resolved and expanded attempted/resolved/blocked, including expansion and expanded-resolution rates.
+- Publish classifier token/cost efficiency fields only when usage accounting is complete for every executed classifier call; partial accounting remains explicitly incomplete.
+- Add generic semantic-manifest stability comparison (`src/stability.ts`).
+- Keep `python-exceptions` feature-frozen; no audited-application semantic rules were added.
+- Preserve extension-owned primary/refinement contracts, retained IDs, review state machine, token budgets, blocked quarantine, and exact commit semantics.
+
 ## 0.6.3
 
 - Freeze the built-in `python-exceptions` adapter after a de-specialization pass; no new evidence capability is added.
@@ -5,8 +23,6 @@
 - Remove project/domain vocabulary from Python call ranking (`policy`, `decision`) and use generic processing/persistence verbs instead.
 - Remove finance-specific wording from the Python preset and GARP-specific paths/cases from package documentation; synthetic tests now use generic structured-result fixtures.
 - Preserve extension-owned primary/review workflow, fail-closed ambiguity handling, bounded fan-out, handler control-flow, and packet budgets unchanged.
-
-# Changelog
 
 ## 0.6.2 - 2026-10-03
 

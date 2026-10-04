@@ -46,6 +46,8 @@ test("review workflow commit atomically queues expanded evidence and prioritizes
   assert.equal(committed.status, "ready");
   assert.equal(committed.progress?.semanticallyReviewed, 2);
   assert.equal(committed.progress?.needsExpandedEvidence, 1);
+  assert.equal(committed.progress?.standardReviewed, 3);
+  assert.equal(committed.progress?.standardResolved, 2);
   const next = await manager.next(start.workflowId, build);
   assert.equal(next.status, "packet");
   assert.equal(next.packet?.detail, "expanded");
@@ -113,6 +115,11 @@ test("terminal workflow returns full findings, blocked evidence, and cumulative 
   assert.equal(final.status, "review_complete_with_blocked_evidence");
   assert.equal(final.progress?.semanticallyReviewed, 1);
   assert.equal(final.progress?.blockedEvidence, 1);
+  assert.equal(final.progress?.expandedAttempted, 1);
+  assert.equal(final.progress?.expandedResolved, 0);
+  assert.equal(final.progress?.expandedBlocked, 1);
+  assert.equal(final.progress?.expansionRate, 0.5);
+  assert.equal(final.progress?.expandedResolutionRate, 0);
   assert.equal(final.progress?.resumeAvailable, false);
   assert.deepEqual(final.findings, [{ id: "a", rationale: "core failure hidden" }]);
   assert.deepEqual(final.blockedEvidence, [{ id: "b", rationale: "still ambiguous" }]);

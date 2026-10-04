@@ -19,9 +19,9 @@ test("package exposes extensions, skills, and prompt templates", () => {
   assert.ok(packageJson.pi?.prompts?.length > 0);
 });
 
-test("generic skill delegates discovery/evidence to presets and adapters", () => {
-  assert.match(skill, /Presets contain classifier and review policy; adapters own deterministic discovery and evidence extraction/i);
-  assert.match(skill, /Do not reimplement adapter logic in Code Mode, Python, PowerShell, grep, or ad-hoc AST code/i);
+test("generic skill delegates discovery/evidence to presets and providers", () => {
+  assert.match(skill, /Presets contain classifier and review policy; providers own deterministic discovery and evidence extraction/i);
+  assert.match(skill, /Do not reimplement provider logic in Code Mode, Python, PowerShell, grep, or ad-hoc AST code/i);
   assert.match(skill, /screen_preset\(\{id\}\)/i);
   assert.match(skill, /screen_discover\(\{preset:id, scope, mode:"count"\}\)/i);
 });

@@ -11,5 +11,6 @@ declare module "typebox" {
     Literal(value: string | number | boolean): Schema;
     Tuple(items: Schema[], options?: Record<string, unknown>): Schema;
     Union(schemas: Schema[]): Schema;
+    Unknown(options?: Record<string, unknown>): Schema;
   };
 }

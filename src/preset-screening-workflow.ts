@@ -1,5 +1,6 @@
 import type { AdapterCandidate, AdapterDiscoverResult } from "./adapters/types.ts";
-import type { ScreeningInput, ScreeningResult } from "./engine.ts";
+import type { ClassifierUsageLike, ScreeningInput, ScreeningResult } from "./engine.ts";
+import { buildScreeningEfficiency, type ScreeningEfficiencyMetrics } from "./metrics.ts";
 import type { ScreeningPreset, ScreeningStagePreset } from "./presets/types.ts";
 import type { ReviewWorkflowProgress, ReviewWorkflowStartResult } from "./review-workflow.ts";
 
@@ -13,6 +14,10 @@ export interface ScreeningStageSummary {
   retained: number;
   model?: { provider: string; id: string };
   reusedScreening: boolean;
+  classifierCalls: number;
+  cacheHits: number;
+  cacheMisses: number;
+  classifierUsage?: ClassifierUsageLike;
 }
 
 export interface PrimaryScreeningStartResult {
@@ -21,6 +26,7 @@ export interface PrimaryScreeningStartResult {
   scope: string;
   primaryRunId?: string;
   primary?: ScreeningStageSummary;
+  efficiency?: ScreeningEfficiencyMetrics;
   reviewStarted: boolean;
   workflowId?: string;
   progress?: ReviewWorkflowProgress;
@@ -38,6 +44,7 @@ export interface RefinementScreeningStartResult {
   scope?: string;
   primaryRunId?: string;
   primary?: ScreeningStageSummary;
+  efficiency?: ScreeningEfficiencyMetrics;
   refinement?: ScreeningStageSummary & { refinementYield: number; lowYield: boolean };
   reviewStarted: boolean;
   workflowId?: string;
@@ -63,7 +70,7 @@ export interface PresetScreeningWorkflowDependencies {
     model?: string;
     rescreen?: boolean;
     signal?: AbortSignal;
-  }): Promise<{ result: ScreeningResult; reused: boolean }>;
+  }): Promise<{ result: ScreeningResult; reused: boolean; cacheHits?: number; cacheMisses?: number }>;
   startReview(request: {
     preset: ScreeningPreset;
     scope: string;
@@ -126,7 +133,12 @@ export function retainedIds(result: ScreeningResult): string[] {
   return [...result.kept, ...result.undecided, ...result.withheld, ...result.errors].map((entry) => entry.id);
 }
 
-function summarize(result: ScreeningResult, reusedScreening: boolean): ScreeningStageSummary {
+function summarize(
+  result: ScreeningResult,
+  reusedScreening: boolean,
+  cacheHits = 0,
+  cacheMisses = result.summary.total,
+): ScreeningStageSummary {
   const retained = result.summary.kept + result.summary.undecided + result.summary.withheld + result.summary.errors;
   return {
     total: result.summary.total,
@@ -138,7 +150,29 @@ function summarize(result: ScreeningResult, reusedScreening: boolean): Screening
     retained,
     ...(result.model ? { model: result.model } : {}),
     reusedScreening,
+    classifierCalls: result.classifierAccounting?.calls ?? 0,
+    cacheHits,
+    cacheMisses,
+    ...(result.classifierAccounting?.complete && result.classifierAccounting.usage
+      ? { classifierUsage: result.classifierAccounting.usage }
+      : {}),
   };
+}
+
+function efficiency(summary: ScreeningStageSummary): ScreeningEfficiencyMetrics {
+  return buildScreeningEfficiency({
+    total: summary.total,
+    kept: summary.kept,
+    dropped: summary.dropped,
+    undecided: summary.undecided,
+    withheld: summary.withheld,
+    errors: summary.errors,
+    retained: summary.retained,
+    classifierCalls: summary.classifierCalls,
+    cacheHits: summary.cacheHits,
+    cacheMisses: summary.cacheMisses,
+    usage: summary.classifierUsage,
+  });
 }
 
 function retainedCandidates(items: AdapterCandidate[], result: ScreeningResult): AdapterCandidate[] {
@@ -160,6 +194,9 @@ function zeroStageSummary(): ScreeningStageSummary {
     errors: 0,
     retained: 0,
     reusedScreening: false,
+    classifierCalls: 0,
+    cacheHits: 0,
+    cacheMisses: 0,
   };
 }
 
@@ -205,7 +242,7 @@ export class PresetScreeningWorkflowManager {
       };
     }
 
-    const key = `${request.preset.id}\n${scope}`;
+    const key = `${request.preset.id}\n${JSON.stringify(request.preset)}\n${scope}\n${request.provider ?? "<default-provider>"}\n${request.model ?? "<default-model>"}`;
     const existing = request.rescreen === true ? undefined : this.byKey.get(key);
     if (existing) {
       if (request.deferReview === true && existing.review) {
@@ -215,6 +252,7 @@ export class PresetScreeningWorkflowManager {
           scope: existing.scope,
           primaryRunId: existing.id,
           primary: existing.primary,
+          efficiency: efficiency(existing.primary),
           reviewStarted: true,
           workflowId: existing.review.workflowId,
           progress: existing.review.progress,
@@ -237,6 +275,7 @@ export class PresetScreeningWorkflowManager {
             scope: existing.scope,
             primaryRunId: existing.id,
             primary: existing.primary,
+            efficiency: efficiency(existing.primary),
             reviewStarted: false,
             refinementAvailable: Boolean(existing.preset.refinement),
             refinementDeferred: false,
@@ -252,6 +291,7 @@ export class PresetScreeningWorkflowManager {
         scope: existing.scope,
         primaryRunId: existing.id,
         primary: existing.primary,
+        efficiency: efficiency(existing.primary),
         reviewStarted: Boolean(existing.review),
         workflowId: existing.review?.workflowId,
         progress: existing.review?.progress,
@@ -311,13 +351,14 @@ export class PresetScreeningWorkflowManager {
         signal: request.signal,
       });
       const result = screened.result;
-      primary = summarize(result, screened.reused);
+      primary = summarize(result, screened.reused, screened.cacheHits ?? 0, screened.cacheMisses ?? items.length);
       if (result.status !== "ok") {
         return {
           status: result.status,
           preset: request.preset.id,
           scope,
           primary,
+          efficiency: efficiency(primary),
           reviewStarted: false,
           refinementAvailable: Boolean(request.preset.refinement),
           refinementDeferred: Boolean(request.deferReview),
@@ -355,6 +396,7 @@ export class PresetScreeningWorkflowManager {
           scope,
           primaryRunId: id,
           primary,
+          efficiency: efficiency(primary),
           reviewStarted: false,
           refinementAvailable: Boolean(request.preset.refinement),
           refinementDeferred: false,
@@ -373,6 +415,7 @@ export class PresetScreeningWorkflowManager {
       scope,
       primaryRunId: id,
       primary,
+      efficiency: efficiency(primary),
       reviewStarted: Boolean(state.review),
       workflowId: state.review?.workflowId,
       progress: state.review?.progress,
@@ -409,6 +452,7 @@ export class PresetScreeningWorkflowManager {
         scope: state.scope,
         primaryRunId: state.id,
         primary: state.primary,
+        efficiency: efficiency(state.primary),
         reviewStarted: Boolean(state.review),
         workflowId: state.review?.workflowId,
         progress: state.review?.progress,
@@ -423,6 +467,7 @@ export class PresetScreeningWorkflowManager {
         scope: state.scope,
         primaryRunId: state.id,
         primary: state.primary,
+        efficiency: efficiency(state.primary),
         refinement: state.refinement,
         reviewStarted: true,
         workflowId: state.review.workflowId,
@@ -438,6 +483,7 @@ export class PresetScreeningWorkflowManager {
         scope: state.scope,
         primaryRunId: state.id,
         primary: state.primary,
+        efficiency: efficiency(state.primary),
         reviewStarted: true,
         workflowId: state.review.workflowId,
         progress: state.review.progress,
@@ -463,7 +509,7 @@ export class PresetScreeningWorkflowManager {
         signal: request.signal,
       });
       const result = screened.result;
-      const summary = summarize(result, screened.reused);
+      const summary = summarize(result, screened.reused, screened.cacheHits ?? 0, screened.cacheMisses ?? state.retainedItems.length);
       const refinementYield = state.primary.retained > 0 ? result.summary.dropped / state.primary.retained : 0;
       refinement = { ...summary, refinementYield, lowYield: refinementYield < 0.30 };
       if (result.status !== "ok") {
@@ -473,6 +519,7 @@ export class PresetScreeningWorkflowManager {
           scope: state.scope,
           primaryRunId: state.id,
           primary: state.primary,
+          efficiency: efficiency(state.primary),
           refinement,
           reviewStarted: false,
           reusedInitialization: false,
@@ -496,6 +543,7 @@ export class PresetScreeningWorkflowManager {
         scope: state.scope,
         primaryRunId: state.id,
         primary: state.primary,
+        efficiency: efficiency(state.primary),
         refinement,
         reviewStarted: false,
         reusedInitialization: false,
@@ -511,6 +559,7 @@ export class PresetScreeningWorkflowManager {
       scope: state.scope,
       primaryRunId: state.id,
       primary: state.primary,
+      efficiency: efficiency(state.primary),
       refinement,
       reviewStarted: true,
       workflowId: review.workflowId,

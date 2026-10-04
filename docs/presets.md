@@ -1,43 +1,85 @@
 # Presets
 
-A preset contains semantic policy, not source traversal or workflow-state logic.
+Presets own semantic policy and provider selection. 0.7 supports both compiled builtin presets and declarative JSON presets.
 
 A preset defines:
 
-- `id`, label, description;
-- adapter ID;
-- primary classifier question / true-false criteria / threshold;
-- optional opt-in refinement stage;
-- review `instructions`, `confirmWhen`, `rejectWhen`;
-- evidence packet defaults (`targetItems`, source/character caps, token budget).
+- ID, label, description;
+- evidence provider selection/configuration;
+- primary classifier question, criteria, threshold;
+- optional refinement classifier stage;
+- review instructions / confirm / reject policy;
+- evidence packet budgets.
 
-The canonical flow performs count-only discovery/preflight, then `screen_primary_start` loads the preset again inside the extension, performs candidate discovery internally, applies the exact preset primary contract, computes retained IDs, and starts review. The model never copies the preset question/criteria/threshold or retained IDs. The preset's review policy is embedded into every packet returned by `screen_review_next`.
+It does not own mutable review state or classifier orchestration.
 
-## Adding a preset
+## Declarative lookup
 
-If an existing adapter already produces the candidate/evidence semantics you need, add only a new preset under `src/presets/` and register it. Do not clone `/screen-use` or implement a new state machine.
+`getPreset(id)` resolves in this order:
 
-A use-case-specific alias prompt is optional and should stay tiny.
+1. builtin preset ID;
+2. `PI_SEMANTIC_SCREEN_PRESET_DIR/<id>.json`;
+3. `<cwd>/.pi-semantic-screen/presets/<id>.json`;
+4. shipped `presets/<id>.json`;
+5. an explicit JSON path passed as the preset argument.
 
-## Refinement
+Malformed direct presets fail closed. Listing is best-effort and skips malformed files rather than making all valid presets unavailable.
 
-Refinement is opt-in. A large retained set does not authorize another classifier pass. If refinement is requested, primary initialization is deferred and `screen_refinement_start` runs the exact preset refinement contract over extension-owned retained primary candidates. Refinement has its own call guard/approval boundary and starts review from its exact retained IDs without model reconstruction.
+## Minimal JSON model
 
-## Review contract
-
-At runtime the extension combines the preset review policy with the generic disposition vocabulary:
-
-```text
-CONFIRM
-EXPLICIT_FAILURE
-UI_ONLY
-OPTIONAL_ENRICHMENT
-CLEANUP_RETRY_TELEMETRY
-EXPECTED_NORMALIZATION
-NO_OUTWARD_EFFECT
-INSUFFICIENT_EVIDENCE
+```json
+{
+  "id": "my-audit",
+  "label": "My audit",
+  "description": "...",
+  "provider": {
+    "kind": "generic-source",
+    "config": {
+      "include": ["**/*.ts"],
+      "patterns": [
+        { "id": "candidate", "regex": "\\bcatch\\s*\\(" }
+      ],
+      "candidate": { "beforeLines": 1, "afterLines": 4, "maxChars": 3000 },
+      "evidence": {
+        "standard": { "beforeLines": 4, "afterLines": 12, "maxChars": 10000 },
+        "expanded": { "beforeLines": 12, "afterLines": 36, "maxChars": 24000 }
+      }
+    }
+  },
+  "primary": {
+    "question": "...",
+    "criteria": { "true": "...", "false": "..." },
+    "threshold": 0.7
+  },
+  "review": {
+    "instructions": "...",
+    "confirmWhen": "...",
+    "rejectWhen": "..."
+  },
+  "evidence": {
+    "targetItems": 40,
+    "maxItems": 60,
+    "maxSources": 10,
+    "maxChars": 120000,
+    "maxTokens": 7200
+  }
+}
 ```
 
-Only `CONFIRM` creates a finding. Standard `INSUFFICIENT_EVIDENCE` is automatically routed to expanded evidence; expanded insufficiency is quarantined per ID without stopping independent targets.
+JSON is intentional for the MVP: it avoids adding a YAML parser/runtime dependency before the declarative model stabilizes.
 
-For `python-exceptions`, `EXPECTED_NORMALIZATION` is intentionally narrow. Silently omitting malformed authoritative records or returning a normal empty/default domain object after failed authoritative persisted-state loading is not normalization unless the outward/source contract explicitly allows and surfaces that behavior.
+## Reusing an advanced builtin provider
+
+Declarative presets may also select an existing provider:
+
+```json
+"provider": { "kind": "builtin", "id": "python-exceptions" }
+```
+
+This permits a different semantic classifier/review question over the same deterministic facts without modifying extension code.
+
+## Semantic separation
+
+Provider evidence should say things such as "caught failure", "returned default", "source window contains return {}". The preset/reviewer decides whether that behavior is a finding for the current semantic question.
+
+For `python-exceptions`, the existing narrow normalization policy remains preset-owned and unchanged.

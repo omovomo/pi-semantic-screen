@@ -27,7 +27,7 @@ test("extension exposes screening and extension-owned review tools", () => {
   assert.match(source, /reviewCommitOutputSchema/);
   assert.match(source, /ReviewWorkflowManager/);
   assert.match(source, /structuredContent:\s*result/);
-  assert.match(source, /runWithScreeningCache/);
+  assert.match(source, /runWithClassificationCache/);
   assert.match(source, /classifierAccounting/);
   assert.doesNotMatch(source, /@garygentry\/system1-pi|decide\.exe|\bspawn(?:Sync)?\([^\n]*["\']decide["\']/i);
 });
@@ -77,5 +77,5 @@ test("canonical preset screening never accepts model-supplied semantic contracts
   assert.doesNotMatch(primarySchema, /criteria:/);
   assert.doesNotMatch(primarySchema, /threshold:/);
   assert.match(source, /contractSource:\s*"preset"/);
-  assert.match(source, /resultCache\.clear\(\)/);
+  assert.match(source, /classificationCache\.clear\(\)/);
 });

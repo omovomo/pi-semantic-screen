@@ -1,16 +1,16 @@
 {
   "name": "pi-semantic-screen",
-  "version": "0.6.3",
+  "version": "0.7.0",
   "type": "module",
-  "description": "Adapter-driven semantic screening and extension-owned evidence review for Pi",
+  "description": "Classifier-first semantic screening engine with declarative presets and pluggable evidence providers for Pi",
   "keywords": [
     "pi-package",
     "classifier",
-    "codemode",
     "semantic-screening",
-    "batch-screening",
-    "adapters",
-    "presets"
+    "classifier-first",
+    "declarative-presets",
+    "evidence-providers",
+    "adapters"
   ],
   "engines": {
     "node": ">=22.19.0"
@@ -48,6 +48,7 @@
     "extensions/",
     "src/",
     "skills/",
+    "presets/",
     "prompts/",
     "docs/",
     "README.md",

@@ -5,7 +5,7 @@ This repository is a Pi package. Before changing runtime behavior, read `README.
 ## Architectural invariants
 
 - Keep `screen_batch` generic; it must not know about Python, exceptions, files, or specific audits.
-- Deterministic source discovery/evidence belongs in adapters under `src/adapters/`.
+- Deterministic source discovery/evidence belongs in providers under `src/providers/` or advanced compatibility adapters under `src/adapters/`.
 - Semantic questions, thresholds, and review policy belong in presets under `src/presets/`.
 - Canonical preset screening must load primary/refinement contracts inside the extension; prompts/Code Mode must not serialize or reconstruct them.
 - Canonical retained candidate IDs belong in `PresetScreeningWorkflowManager`; canonical semantic-review state belongs in `ReviewWorkflowManager`.

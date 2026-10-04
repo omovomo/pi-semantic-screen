@@ -1,204 +1,223 @@
 # Architecture
 
-`pi-semantic-screen` separates classifier screening, semantic policy, deterministic source integration, and review-state ownership.
+`pi-semantic-screen` 0.7 is a **classifier-first semantic screening engine**. Discovery/evidence providers supply bounded facts; presets own semantic policy; the primary classifier removes cheap negatives before expensive semantic review.
 
 ```text
-prompt / command
-      |
-      +--> preset registry ------------------------------+
-      |     primary/refinement/review semantic policy    |
-      |                                                  |
-      +--> adapter registry                              |
-      |     deterministic discovery/evidence             |
-      |                                                  |
-      +--> count discovery + screen_preflight            |
-      |                                                  |
-      +--> screen_primary_start -------------------------+
-      |     exact preset primary contract                |
-      |     extension-owned retained IDs                 |
-      |     optional defer for explicit refinement       |
-      |                                                  |
-      +--> screen_refinement_start (optional) -----------+
-      |     exact preset refinement contract             |
-      |                                                  |
-      +--> extension-owned ReviewWorkflowManager
-              |
-              +--> screen_review_next
-              |      -> adapter evidence
-              |      -> token bound
-              |      -> reviewContract
-              |      -> exact pending packet
-              |
-              +--> screen_review_commit
-                     -> exact coverage validation
-                     -> reviewed/evidenceSeen
-                     -> expanded queue
-                     -> blocked quarantine
-                     -> findings
-                     -> terminal status
-
-screen_batch / screen_review_start remain low-level compatibility APIs.
+large candidate universe
+        |
+        v
+deterministic provider discovery
+        |
+        v
+PRIMARY CLASSIFIER  <---- per-candidate semantic cache
+   |        |
+   |        +---- DROP --------------------------> stop
+   |
+   +------------- KEEP / UNDECIDED / unresolved
+                         |
+                         v
+                 semantic review
+                         |
+                 standard evidence
+                         |
+              resolved / insufficient
+                         |
+                  expanded evidence
+                         |
+                         v
+                  final disposition
 ```
 
-## Generic classifier engine
+The cost model is intentionally asymmetric:
 
-`screen_batch` remains the generic low-level classifier primitive: stable candidate IDs/text, boolean criteria, threshold/model options, and the deterministic call guard. It does not know files, Python, exceptions, callers, presets, or review workflow state.
+```text
+C_discovery << C_primary << C_review
+C_standard  << C_expanded
+```
 
-Canonical preset workflows do **not** ask the model to call `screen_batch`. `screen_primary_start` / `screen_refinement_start` build the `ScreeningInput` inside the extension from the registered preset, so the model cannot paraphrase or replace the preset question, criteria, or threshold.
+The core optimization target is therefore safe **review avoidance**, not adapter rule count or raw finding count.
 
-`screen_preflight` applies the projected-call guard from count-only discovery with zero classifier calls and no rich candidate text.
+## Stable ownership boundaries
 
-## Presets
+### Generic core
 
-A preset defines semantic policy:
+The core owns:
 
-- public ID/description;
-- adapter ID;
-- primary classifier stage;
-- optional opt-in refinement stage;
-- semantic review instructions / confirm / reject policy;
-- evidence packet defaults.
+- classifier execution and call guard;
+- per-candidate classification cache;
+- preset-owned primary/refinement execution;
+- review scheduling/state;
+- standard -> expanded escalation;
+- token/packet budgets;
+- blocked-evidence quarantine;
+- exact accounting;
+- efficiency metrics;
+- generic semantic-stability comparison.
 
-A preset does not implement traversal, parsing, evidence extraction, or review-state bookkeeping.
+It does not know language-specific exception semantics, application class names, domain concepts, or project-specific business rules.
 
+### Preset
 
-## Extension-owned preset screening workflow
+A preset owns semantic meaning:
 
-0.6.x moves preset screening semantics and retained-candidate ownership out of prompts/Code Mode, mirroring the 0.5.x review-state move.
+- candidate/source provider selection;
+- primary classifier question, criteria, threshold;
+- optional refinement contract;
+- semantic review contract;
+- evidence budgets.
 
-### Primary
+0.7 adds declarative JSON presets. They may reference a builtin provider or configure the bounded `generic-source` provider. A preset can be shipped, loaded from `.pi-semantic-screen/presets/<id>.json`, from `PI_SEMANTIC_SCREEN_PRESET_DIR`, or by explicit JSON path.
 
-`screen_primary_start({preset, scope, confirm, ...})` performs candidate-mode discovery internally and constructs the primary classifier input exclusively from `preset.primary`. There are no model-visible `question`, `criteria`, `threshold`, candidate-array, or `reviewTargetIds` parameters.
+### Evidence provider
 
-On a successful primary result, the extension computes exactly:
+The provider boundary is versioned:
+
+```ts
+interface EvidenceProvider {
+  apiVersion: 1;
+  id: string;
+  label: string;
+  discover(request): Promise<EvidenceDiscoverResult>;
+  evidence(request): Promise<EvidenceResult>;
+}
+```
+
+Providers report facts. They must not decide whether those facts are semantically good/bad for the current audit.
+
+`python-exceptions` now implements exactly this boundary and remains the feature-frozen reference advanced provider. `src/adapters/types.ts` and `src/adapters/registry.ts` remain compatibility aliases.
+
+## Declarative / adapter-light path
+
+0.7 deliberately does **not** add a universal AST/dataflow framework. The first generic provider is `generic-source`, which gives a bounded deterministic vocabulary:
+
+- include/exclude source globs;
+- regex discovery patterns;
+- stable source location + matched span;
+- bounded candidate source window;
+- bounded standard evidence window;
+- wider bounded expanded evidence window;
+- exact item/source/character caps.
+
+This is enough to prove a second meaningful JS/TS use case (`js-ts-silent-fallbacks`) without changing extension TypeScript for that use case.
+
+The provider does not claim AST or call-graph facts. If an audit requires exact symbol flow, callers/callees, language-specific parse trees, or structured control-flow, that remains an advanced provider capability until a small cross-language primitive is justified by multiple use cases.
+
+## Canonical preset workflow
+
+The canonical path remains extension-owned:
+
+```text
+screen_preset
+-> screen_discover(mode=count)
+-> screen_preflight
+-> user approval if required
+-> screen_primary_start
+-> screen_review_next
+-> screen_review_commit
+-> ...
+```
+
+The model does not reconstruct `primary.question`, `criteria`, `threshold`, retained IDs, or review target IDs.
+
+`screen_batch` and `screen_review_start` remain low-level compatibility APIs.
+
+### Primary initialization
+
+`screen_primary_start` performs candidate discovery internally, constructs the exact preset-owned classifier input, classifies only cache misses, computes:
 
 ```text
 retained = kept + undecided + withheld + errors
 ```
 
-For the normal path it immediately starts `ReviewWorkflowManager` with those IDs. The first successful `preset+scope` initialization is canonical for the active Pi session; repeated calls reuse the same `primaryRunId`/`workflowId` without rediscovery or classifier calls unless `rescreen:true` is explicit. Failed or approval-required primary runs do not become canonical state.
+and starts `ReviewWorkflowManager` unless review was explicitly deferred for refinement.
+
+The first successful initialization for the same preset definition, scope, and resolved classifier identity is canonical for the Pi session. Changing the declarative contract or selected classifier creates a new canonical key. Approval-required/error runs never become canonical state.
 
 ### Optional refinement
 
-Explicit refinement uses `screen_primary_start(..., deferReview:true)`. The manager stores only the retained primary candidates in process-local state and returns an opaque `primaryRunId`. `screen_refinement_start({primaryRunId, confirm})` runs the exact `preset.refinement` contract over those retained candidates, applies its own call guard, computes refined retained IDs, and starts review. The model never reconstructs refinement candidates or semantic criteria.
+`screen_primary_start(..., deferReview:true)` stores primary-retained candidates in extension state. `screen_refinement_start({primaryRunId,...})` applies the exact preset refinement contract and then starts review. Refinement remains opt-in.
 
-### State lifetime
+## Classification cache boundary
 
-Preset-screening state is process-local and reset on Pi `session_start` together with review state and the screening result cache. Context compaction does not erase it. A process restart requires fresh preflight/screening.
+0.7 replaces canonical whole-batch reuse with per-candidate semantic reuse.
 
-## Value-directed expanded evidence
-
-The built-in Python adapter may enrich only `detail:"expanded"` packets with deterministic value-directed evidence. It traces concrete affected values through local reads/calls/returns and at most two exact call edges, treats direct fallback returns as synthetic affected values when one exact caller binding exists, suppresses false empty-container sentinels when the caught path can mutate them, and can connect exact structured-data constructors to downstream consumer guards with explicit bounded outcomes. Ambiguous bindings are not guessed and remain `unknown`. These extractors are evidence-only: they do not decide whether a fallback is safe or material. Review state and semantic disposition policy are unchanged.
-
-## Adapters
-
-An adapter implements deterministic source integration:
-
-```ts
-interface ScreeningAdapter {
-  id: string;
-  label: string;
-  discover(request): Promise<AdapterDiscoverResult>;
-  evidence(request): Promise<AdapterEvidenceResult>;
-}
-```
-
-`discover()` exposes cheap `count` and rich `candidates` modes. `evidence()` receives stable IDs and returns exact represented IDs plus bounded evidence. Adapters fail closed on source/identity errors.
-
-## Extension-owned review workflow
-
-0.5.x moved the review state machine out of prompts/Code Mode and into `ReviewWorkflowManager`; 0.6.x leaves those invariants intact while making review initialization internal to preset screening.
-
-### Start
-
-Canonical preset screening/refinement starts review internally with exact extension-owned retained IDs and returns the opaque `workflowId`. `screen_review_start` remains available for low-level/custom integrations that already own exact `reviewTargetIds`.
-
-### Next
-
-`screen_review_next` selects work deterministically:
-
-1. unresolved standard items needing expanded evidence;
-2. otherwise stable-order unreviewed/unblocked standard targets.
-
-The manager invokes the preset adapter, applies the token budget, validates exact packet/item identity, assigns an opaque `packetId`, and stores the packet as pending.
-
-A second `screen_review_next` before commit returns the same pending packet. It does not rebuild evidence or advance the queue.
-
-Pi sends tool `content` to the parent model while `structuredContent` is for programmatic callers. `screen_review_next` therefore serializes the bounded packet/result into model-facing `content` as well as exposing typed `structuredContent`; `screen_review_commit` does the same for progress/findings.
-
-### Commit
-
-`screen_review_commit` accepts only `workflowId`, `packetId`, and semantic dispositions. Dispositions may be objects or compact `[id, disposition, rationale]` tuples; the workflow normalizes both forms before validating the exact current pending packet and delegating exact coverage to the pure `applyReviewDispositions()` function.
-
-State mutation is atomic only after validation succeeds:
+The cache key is derived from:
 
 ```text
-standard INSUFFICIENT_EVIDENCE
-  -> evidenceSeen
-  -> needsExpanded queue
-  -> not reviewed
-
-expanded INSUFFICIENT_EVIDENCE
-  -> evidenceSeen
-  -> blocked quarantine
-  -> not reviewed
-
-terminal non-finding
-  -> evidenceSeen + reviewed
-
-CONFIRM
-  -> evidenceSeen + reviewed + finding
+classifier contract fingerprint
+  (question + criteria + threshold)
++
+normalized candidate fingerprint
+  (candidate id + normalized candidate text)
++
+resolved classifier identity
+  (provider + model id + classifier implementation id)
 ```
 
-A stale packet ID, missing disposition, duplicate disposition, or extra disposition leaves workflow state unchanged.
+Only successful semantic `KEEP` / `DROP` / `UNDECIDED` outcomes are cached. `withheld` and `error` outcomes are recomputed. `rescreen:true` bypasses reuse.
 
-### Terminal status
+The classifier model is resolved **before** canonical cache lookup, so an implicit default-model change cannot reuse a stale semantic result. Changing one candidate recomputes only that candidate; changing the contract or resolved model invalidates all affected entries fail-closed.
 
-When all targets are either reviewed or blocked:
+Review dispositions are intentionally **not** cached in 0.7. Review happens in the parent semantic reasoner, whose exact implementation/model identity and prompt context are not represented reliably enough for safe automatic reuse. Standard and expanded review need separate keys when that boundary becomes trustworthy.
+
+## Efficiency metrics
+
+Primary results expose first-class metrics:
 
 ```text
-complete
+discovered
+primaryEvaluated
+primaryCacheHits
+primaryCacheMisses
+dropped / kept / undecided / retained
+primaryReductionRate
+reviewAvoidanceRate
+primaryCacheHitRate
+classifier input/output/total tokens (only when reported)
+classifier cost (only when reported)
 ```
 
-or:
+`primaryEvaluated` means actual classifier calls in the current run; cache hits are reported separately.
+
+Review workflow progress adds:
 
 ```text
-review_complete_with_blocked_evidence
+standardReviewed
+standardResolved
+expandedAttempted
+expandedResolved
+expandedBlocked
+expansionRate
+expandedResolutionRate
 ```
 
-Blocked IDs remain honestly unreviewed.
+No review token/cost figures are fabricated because review inference is not executed by an extension-owned model call.
+
+## Review workflow and fail-closed semantics
+
+`ReviewWorkflowManager` preserves the 0.5/0.6 invariants:
+
+- `screen_review_next` is idempotent while a packet is pending;
+- exact packet/item identity is validated before review;
+- stale/non-exact commits do not mutate state;
+- standard `INSUFFICIENT_EVIDENCE` queues expanded evidence;
+- expanded `INSUFFICIENT_EVIDENCE` is quarantined as blocked evidence;
+- only `CONFIRM` creates a finding;
+- `reviewedIds ⊆ evidenceSeenIds`;
+- blocked IDs remain evidence-seen but unreviewed.
+
+Ambiguity is never silently converted into success.
+
+## Semantic stability
+
+`src/stability.ts` provides a generic manifest comparator for regression runs. Given `{id, disposition}` entries it reports common candidate IDs, stable/changed disposition counts, stability ratio, and CONFIRM/BLOCKED transitions. It is intentionally a pure comparison primitive rather than a persistent database.
+
+## Provider externalization boundary
+
+0.7 establishes the API boundary but does not yet load arbitrary external npm/local provider modules from config. Builtins are registered in `src/providers/registry.ts`; registration validates provider API version and required capabilities at runtime. Declarative presets may instantiate `generic-source` without registry changes.
+
+The remaining step to fully external providers is a trustworthy loader policy (module resolution, API-version validation, lifecycle, trust/security, packaging). That can be added without changing classifier/review engine contracts.
 
 ## State lifetime
 
-Review workflow state is process-local. It survives model context compaction and ordinary user turns because it is not stored in model context. It is reset on Pi `session_start` / process restart.
-
-This is deliberate: no raw evidence, retained-candidate list, or mutable accounting snapshot is serialized by the model in canonical preset workflows. A future persistent workflow store could be added behind the same opaque APIs without returning ownership to prompts.
-
-## Evidence transport
-
-The adapter applies source/item/character safety caps, then the extension applies the preset `maxTokens` budget to the exact structured evidence payload including `reviewContract` overhead.
-
-Trimming occurs only between complete items. The manager validates that returned `packetIds` exactly match evidence item IDs and that all returned IDs were requested before making the packet pending.
-
-A smaller returned subset than the internal requested set is normal. Requested size is not review coverage.
-
-## Semantic review contract
-
-Each packet carries `instructions`, `confirmWhen`, `rejectWhen`, and the fixed disposition vocabulary. The parent model performs only this semantic step. It never chooses queue order or edits review accounting.
-
-`NO_OUTWARD_EFFECT` requires affirmative evidence. Missing context is `INSUFFICIENT_EVIDENCE`.
-
-For authoritative source data, silently dropping malformed records or replacing failed authoritative persisted-state loading with a normal empty/default domain object is not `EXPECTED_NORMALIZATION` unless that behavior is explicitly permitted and surfaced.
-
-## Low-level compatibility APIs
-
-`screen_batch`, `screen_review_start`, `screen_evidence`, and `screen_review_apply` remain public low-level tools for tests/custom integrations. Canonical preset workflows use:
-
-```text
-screen_primary_start
-[screen_refinement_start]
-screen_review_next
-screen_review_commit
-```
-
-This keeps semantic-contract, retained-ID, and review-state ownership in the extension while preserving reusable primitives.
+Preset-screening state, review state, and classification cache are process-local and reset on Pi `session_start`. Context compaction does not erase them. A Pi process restart requires a fresh screen.

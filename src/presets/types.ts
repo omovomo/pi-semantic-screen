@@ -1,4 +1,5 @@
 import type { ScreeningCriteria } from "../engine.ts";
+import type { EvidenceProviderSpec } from "../providers/spec.ts";
 
 export interface ScreeningStagePreset {
   question: string;
@@ -10,7 +11,10 @@ export interface ScreeningPreset {
   id: string;
   label: string;
   description: string;
+  /** Compatibility/provider label retained for existing tool output and callers. */
   adapter: string;
+  /** Optional provider spec. Omitted means builtin provider with id=adapter. */
+  provider?: EvidenceProviderSpec;
   primary: ScreeningStagePreset;
   refinement?: ScreeningStagePreset;
   review: {

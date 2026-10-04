@@ -1,0 +1,50 @@
+{
+  "id": "js-ts-silent-fallbacks",
+  "label": "JS/TS silent fallback audit",
+  "description": "Find catch/fallback paths that may convert meaningful JavaScript or TypeScript failures into apparently normal/default behavior.",
+  "provider": {
+    "kind": "generic-source",
+    "config": {
+      "include": ["**/*.js", "**/*.mjs", "**/*.cjs", "**/*.ts", "**/*.tsx"],
+      "exclude": ["**/*.d.ts", "**/*.min.js"],
+      "patterns": [
+        {
+          "id": "catch-clause",
+          "label": "catch clause",
+          "regex": "\\bcatch\\s*(?:\\([^)]*\\))?\\s*\\{"
+        },
+        {
+          "id": "promise-catch",
+          "label": "Promise .catch handler",
+          "regex": "\\.catch\\s*\\("
+        }
+      ],
+      "candidate": { "beforeLines": 1, "afterLines": 5, "maxChars": 3500 },
+      "evidence": {
+        "standard": { "beforeLines": 5, "afterLines": 16, "maxChars": 12000 },
+        "expanded": { "beforeLines": 16, "afterLines": 48, "maxChars": 28000 }
+      },
+      "limits": { "maxFiles": 10000, "maxFileBytes": 1000000, "maxCandidates": 100000 }
+    }
+  },
+  "primary": {
+    "threshold": 0.7,
+    "question": "Can this failure handler plausibly turn a meaningful operation failure into apparently valid, default, empty, fallback, or silently incomplete behavior?",
+    "criteria": {
+      "true": "The shown handler or callback suppresses/replaces a failure and the local continuation can plausibly appear successful, normal, defaulted, empty, or incomplete.",
+      "false": "The shown path clearly rethrows/rejects, returns an explicit error/unavailable result, or is visibly limited to cleanup, telemetry, retry, or optional UI-only behavior."
+    }
+  },
+  "review": {
+    "instructions": "Judge only the bounded emitted source evidence. Do not infer hidden callers or dataflow that are not shown. Missing context is INSUFFICIENT_EVIDENCE.",
+    "confirmWhen": "CONFIRM only when the evidence demonstrates that a caught/rejected failure is converted into normal/default/empty/incomplete caller-visible behavior without an explicit failure signal.",
+    "rejectWhen": "Reject explicit failure/rethrow/reject, cleanup/retry/telemetry, UI-only effects, or evidence that demonstrates no outward semantic effect. Use INSUFFICIENT_EVIDENCE when the bounded window cannot establish the effect."
+  },
+  "evidence": {
+    "targetItems": 40,
+    "maxItems": 60,
+    "maxSources": 10,
+    "maxChars": 120000,
+    "maxTokens": 7200
+  }
+}

@@ -5,6 +5,7 @@ export const pythonExceptionsPreset: ScreeningPreset = {
   label: "Python exception suppression audit",
   description: "Find Python exception handlers that may hide real failures as normal/default/incomplete behavior.",
   adapter: "python-exceptions",
+  provider: { kind: "builtin", id: "python-exceptions" },
   primary: {
     threshold: 0.70,
     question:

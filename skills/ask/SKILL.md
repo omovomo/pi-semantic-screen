@@ -1,11 +1,11 @@
 ---
 name: ask
-description: Use pi-semantic-screen presets/adapters to cheaply screen many candidates, then review deterministic evidence with extension-owned exact state.
+description: Use pi-semantic-screen presets/providers to cheaply screen many candidates, then review deterministic evidence with extension-owned exact state.
 ---
 
 # Semantic screening workflow
 
-Prefer the preset/adapter path whenever the task matches an installed preset. Presets contain classifier and review policy; adapters own deterministic discovery and evidence extraction. Do not reimplement adapter logic in Code Mode, Python, PowerShell, grep, or ad-hoc AST code when registered tools can do it.
+Prefer the preset/provider path whenever the task matches an installed preset. Presets contain classifier and review policy; providers own deterministic discovery and evidence extraction. Do not reimplement provider logic in Code Mode, Python, PowerShell, grep, or ad-hoc AST code when registered tools can do it.
 
 ## Canonical preset flow
 
@@ -49,7 +49,7 @@ Use `screen_review_next` and `screen_review_commit` directly for semantic review
 
 `screen_review_next` is idempotent while a packet is pending. If a turn is interrupted after fetch but before commit, the next call returns the same packet and packet ID. A stale or duplicate commit fails closed and does not advance state.
 
-A successful evidence packet may contain fewer IDs than the internal request because adapter/token bounds trim only at whole-item boundaries. This is normal. The extension validates returned packet/item identity before making it pending; the model does not compare requested count to returned count.
+A successful evidence packet may contain fewer IDs than the internal request because provider/token bounds trim only at whole-item boundaries. This is normal. The extension validates returned packet/item identity before making it pending; the model does not compare requested count to returned count.
 
 ## Review contract
 

@@ -83,6 +83,13 @@ function deps(run: (input: ScreeningInput, stage: "primary" | "refinement") => S
           reviewableRemaining: request.reviewTargetIds.length,
           confirmed: 0,
           unreviewed: request.reviewTargetIds.length,
+          standardReviewed: 0,
+          standardResolved: 0,
+          expandedAttempted: 0,
+          expandedResolved: 0,
+          expandedBlocked: 0,
+          expansionRate: 0,
+          expandedResolutionRate: 0,
           resumeAvailable: request.reviewTargetIds.length > 0,
         },
         issues: [],
@@ -157,6 +164,44 @@ test("first successful primary initialization is reused without rediscovery or r
   assert.equal(screens, 1);
 });
 
+test("preset contract changes do not reuse canonical initialization state", async () => {
+  const manager = new PresetScreeningWorkflowManager();
+  let discovers = 0;
+  let screens = 0;
+  const d = deps(() => { screens += 1; return result(); });
+  const originalDiscover = d.value.discoverCandidates;
+  d.value.discoverCandidates = async (request) => { discovers += 1; return originalDiscover(request); };
+  const changedPreset = {
+    ...preset,
+    primary: { ...preset.primary, question: `${preset.primary.question} changed` },
+  };
+
+  const first = await manager.startPrimary({ preset, scope: "my_project/", confirm: true }, d.value);
+  const second = await manager.startPrimary({ preset: changedPreset, scope: "my_project/", confirm: true }, d.value);
+
+  assert.equal(first.status, "ok");
+  assert.equal(second.status, "ok");
+  assert.equal(second.reusedInitialization, false);
+  assert.notEqual(second.workflowId, first.workflowId);
+  assert.equal(discovers, 2);
+  assert.equal(screens, 2);
+});
+
+test("classifier identity changes do not reuse canonical initialization state", async () => {
+  const manager = new PresetScreeningWorkflowManager();
+  let screens = 0;
+  const d = deps(() => { screens += 1; return result(); });
+
+  const first = await manager.startPrimary({ preset, scope: "my_project/", confirm: true, provider: "test", model: "cheap-a" }, d.value);
+  const second = await manager.startPrimary({ preset, scope: "my_project/", confirm: true, provider: "test", model: "cheap-b" }, d.value);
+
+  assert.equal(first.status, "ok");
+  assert.equal(second.status, "ok");
+  assert.equal(second.reusedInitialization, false);
+  assert.notEqual(second.workflowId, first.workflowId);
+  assert.equal(screens, 2);
+});
+
 test("deferred primary keeps retained candidates extension-owned for exact preset refinement", async () => {
   const manager = new PresetScreeningWorkflowManager();
   const d = deps((_input, stage) => {
@@ -202,4 +247,25 @@ test("retainedIds includes kept undecided withheld and errors and excludes dropp
     errors: [{ id: "e", reason: "classifier_error" }],
   });
   assert.deepEqual(retainedIds(r), ["a.py:1-2", "c.py:5-6", "w", "e"]);
+});
+
+
+test("incomplete classifier usage is not promoted to exact efficiency cost", async () => {
+  const manager = new PresetScreeningWorkflowManager();
+  const d = deps(() => result({
+    classifierAccounting: {
+      calls: 3,
+      usageReportedCalls: 2,
+      complete: false,
+      usage: {
+        input: 100, output: 20, cacheRead: 0, cacheWrite: 0, totalTokens: 120,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
+      },
+    },
+  }));
+  const started = await manager.startPrimary({ preset, scope: "usage_project/", confirm: true }, d.value);
+  assert.equal(started.status, "ok");
+  assert.equal(started.primary?.classifierUsage, undefined);
+  assert.equal(started.efficiency?.classifierCost, undefined);
+  assert.equal(started.efficiency?.classifierTotalTokens, undefined);
 });

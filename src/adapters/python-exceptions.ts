@@ -1,3 +1,4 @@
+import { EVIDENCE_PROVIDER_API_VERSION } from "../providers/types.ts";
 import type {
   AdapterDiscoverResult,
   AdapterEvidenceResult,
@@ -18,6 +19,7 @@ interface PythonAdapterRequest {
 const scriptUrl = new URL("./python-exceptions.py", import.meta.url);
 
 export const pythonExceptionsAdapter: ScreeningAdapter = {
+  apiVersion: EVIDENCE_PROVIDER_API_VERSION,
   id: "python-exceptions",
   label: "Python exception handlers",
 

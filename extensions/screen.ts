@@ -13,10 +13,10 @@ import {
   type ScreeningResult,
   classifyBatch,
 } from "../src/engine.ts";
-import { ScreeningResultCache, runWithScreeningCache } from "../src/cache.ts";
+import { ClassificationResultCache, runWithClassificationCache } from "../src/cache.ts";
 import { screeningPreflight } from "../src/preflight.ts";
 import { redactSecrets } from "../src/redaction.ts";
-import { getAdapter } from "../src/adapters/registry.ts";
+import { resolvePresetEvidenceProvider } from "../src/providers/registry.ts";
 import { getPreset, listPresets } from "../src/presets/registry.ts";
 import { boundEvidenceByTokens } from "../src/evidence-budget.ts";
 import { buildReviewContract } from "../src/review-contract.ts";
@@ -35,7 +35,7 @@ const DEFAULT_PROVIDER_MODEL: readonly [string, string] = ["openrouter", "typesa
 const PROVIDER_ORDER = ["openrouter", "typesafe", "opencode", "vercel-ai-gateway", "cloudflare-workers-ai"];
 
 let runtimePromise: Promise<ModelRuntime> | undefined;
-const resultCache = new ScreeningResultCache(4);
+const classificationCache = new ClassificationResultCache(50_000);
 
 function getRuntime(): Promise<ModelRuntime> {
   if (!runtimePromise) {
@@ -195,6 +195,22 @@ function createBackend(signal?: AbortSignal): ClassifierBackend {
   };
 }
 
+async function resolveClassifierInput(input: ScreeningInput, signal?: AbortSignal): Promise<{
+  input: ScreeningInput;
+  identity: { provider: string; id: string; implementation: string };
+}> {
+  const runtime = await getRuntime();
+  const selected = await resolveClassifierModel(runtime, {
+    provider: input.provider,
+    model: input.model,
+    signal,
+  });
+  return {
+    input: { ...input, provider: selected.provider, model: selected.id },
+    identity: { provider: selected.provider, id: selected.id, implementation: "pi-classifier-v1" },
+  };
+}
+
 function estimateClassifierTokens(text: string): number {
   return estimateTokens({ role: "user", content: text, timestamp: 0 });
 }
@@ -291,6 +307,8 @@ const outputSchema = Type.Object(
       ),
     ),
     reused: Type.Optional(Type.Boolean()),
+    cacheHits: Type.Optional(Type.Integer({ minimum: 0 })),
+    cacheMisses: Type.Optional(Type.Integer({ minimum: 0 })),
   },
   { additionalProperties: false },
 );
@@ -331,6 +349,7 @@ const presetOutputSchema = Type.Object(
           label: Type.String(),
           description: Type.String(),
           adapter: Type.String(),
+          provider: Type.Optional(Type.Unknown()),
           primary: stagePresetSchema,
           refinement: Type.Optional(stagePresetSchema),
           review: Type.Object(
@@ -568,6 +587,13 @@ const reviewWorkflowProgressSchema = Type.Object(
     reviewableRemaining: Type.Integer({ minimum: 0 }),
     confirmed: Type.Integer({ minimum: 0 }),
     unreviewed: Type.Integer({ minimum: 0 }),
+    standardReviewed: Type.Integer({ minimum: 0 }),
+    standardResolved: Type.Integer({ minimum: 0 }),
+    expandedAttempted: Type.Integer({ minimum: 0 }),
+    expandedResolved: Type.Integer({ minimum: 0 }),
+    expandedBlocked: Type.Integer({ minimum: 0 }),
+    expansionRate: Type.Number({ minimum: 0, maximum: 1 }),
+    expandedResolutionRate: Type.Number({ minimum: 0, maximum: 1 }),
     resumeAvailable: Type.Boolean(),
   },
   { additionalProperties: false },
@@ -695,6 +721,48 @@ const screeningStageSummarySchema = Type.Object(
     retained: Type.Integer({ minimum: 0 }),
     model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() }, { additionalProperties: false })),
     reusedScreening: Type.Boolean(),
+    classifierCalls: Type.Integer({ minimum: 0 }),
+    cacheHits: Type.Integer({ minimum: 0 }),
+    cacheMisses: Type.Integer({ minimum: 0 }),
+    classifierUsage: Type.Optional(
+      Type.Object(
+        {
+          input: Type.Number({ minimum: 0 }), output: Type.Number({ minimum: 0 }),
+          cacheRead: Type.Number({ minimum: 0 }), cacheWrite: Type.Number({ minimum: 0 }),
+          cacheWrite1h: Type.Optional(Type.Number({ minimum: 0 })),
+          reasoning: Type.Optional(Type.Number({ minimum: 0 })),
+          totalTokens: Type.Number({ minimum: 0 }),
+          cost: Type.Object(
+            { input: Type.Number({ minimum: 0 }), output: Type.Number({ minimum: 0 }), cacheRead: Type.Number({ minimum: 0 }), cacheWrite: Type.Number({ minimum: 0 }), total: Type.Number({ minimum: 0 }) },
+            { additionalProperties: false },
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const efficiencySchema = Type.Object(
+  {
+    discovered: Type.Integer({ minimum: 0 }),
+    primaryEvaluated: Type.Integer({ minimum: 0 }),
+    primaryCacheHits: Type.Integer({ minimum: 0 }),
+    primaryCacheMisses: Type.Integer({ minimum: 0 }),
+    dropped: Type.Integer({ minimum: 0 }),
+    kept: Type.Integer({ minimum: 0 }),
+    undecided: Type.Integer({ minimum: 0 }),
+    retained: Type.Integer({ minimum: 0 }),
+    withheld: Type.Integer({ minimum: 0 }),
+    errors: Type.Integer({ minimum: 0 }),
+    primaryReductionRate: Type.Number({ minimum: 0, maximum: 1 }),
+    reviewAvoidanceRate: Type.Number({ minimum: 0, maximum: 1 }),
+    primaryCacheHitRate: Type.Number({ minimum: 0, maximum: 1 }),
+    classifierInputTokens: Type.Optional(Type.Number({ minimum: 0 })),
+    classifierOutputTokens: Type.Optional(Type.Number({ minimum: 0 })),
+    classifierTotalTokens: Type.Optional(Type.Number({ minimum: 0 })),
+    classifierCost: Type.Optional(Type.Number({ minimum: 0 })),
   },
   { additionalProperties: false },
 );
@@ -719,6 +787,7 @@ const primaryStartOutputSchema = Type.Object(
     scope: Type.String(),
     primaryRunId: Type.Optional(Type.String()),
     primary: Type.Optional(screeningStageSummarySchema),
+    efficiency: Type.Optional(efficiencySchema),
     reviewStarted: Type.Boolean(),
     workflowId: Type.Optional(Type.String()),
     progress: Type.Optional(reviewWorkflowProgressSchema),
@@ -743,6 +812,25 @@ const refinementSummarySchema = Type.Object(
     retained: Type.Integer({ minimum: 0 }),
     model: Type.Optional(Type.Object({ provider: Type.String(), id: Type.String() }, { additionalProperties: false })),
     reusedScreening: Type.Boolean(),
+    classifierCalls: Type.Integer({ minimum: 0 }),
+    cacheHits: Type.Integer({ minimum: 0 }),
+    cacheMisses: Type.Integer({ minimum: 0 }),
+    classifierUsage: Type.Optional(
+      Type.Object(
+        {
+          input: Type.Number({ minimum: 0 }), output: Type.Number({ minimum: 0 }),
+          cacheRead: Type.Number({ minimum: 0 }), cacheWrite: Type.Number({ minimum: 0 }),
+          cacheWrite1h: Type.Optional(Type.Number({ minimum: 0 })),
+          reasoning: Type.Optional(Type.Number({ minimum: 0 })),
+          totalTokens: Type.Number({ minimum: 0 }),
+          cost: Type.Object(
+            { input: Type.Number({ minimum: 0 }), output: Type.Number({ minimum: 0 }), cacheRead: Type.Number({ minimum: 0 }), cacheWrite: Type.Number({ minimum: 0 }), total: Type.Number({ minimum: 0 }) },
+            { additionalProperties: false },
+          ),
+        },
+        { additionalProperties: false },
+      ),
+    ),
     refinementYield: Type.Number({ minimum: 0, maximum: 1 }),
     lowYield: Type.Boolean(),
   },
@@ -765,6 +853,7 @@ const refinementStartOutputSchema = Type.Object(
     scope: Type.Optional(Type.String()),
     primaryRunId: Type.Optional(Type.String()),
     primary: Type.Optional(screeningStageSummarySchema),
+    efficiency: Type.Optional(efficiencySchema),
     refinement: Type.Optional(refinementSummarySchema),
     reviewStarted: Type.Boolean(),
     workflowId: Type.Optional(Type.String()),
@@ -846,10 +935,11 @@ async function buildEvidencePacket(request: {
   maxChars?: number;
   maxTokens?: number;
   detail?: "standard" | "expanded";
+  presetDefinition?: ReturnType<typeof getPreset>;
   signal?: AbortSignal;
 }): Promise<ReviewEvidencePacket> {
-  const preset = getPreset(request.preset);
-  const adapter = getAdapter(preset.adapter);
+  const preset = request.presetDefinition ?? getPreset(request.preset);
+  const adapter = resolvePresetEvidenceProvider(preset);
   const detail = request.detail ?? "standard";
   const result = await adapter.evidence({
     scope: request.scope,
@@ -891,14 +981,15 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
   let semanticScreenWorkflowActive = false;
   let compactionInFlight = false;
   const reviewWorkflows = new ReviewWorkflowManager();
+  const reviewPresetSnapshots = new Map<string, ReturnType<typeof getPreset>>();
   const presetScreeningWorkflows = new PresetScreeningWorkflowManager();
 
   const presetWorkflowDependencies = (
     signal?: AbortSignal,
-    onScreened?: (screened: { result: Awaited<ReturnType<typeof classifyBatch>>; reused: boolean }) => void,
+    onScreened?: (screened: Awaited<ReturnType<typeof runWithClassificationCache>>) => void,
   ) => ({
     async discoverCandidates(request: { preset: ReturnType<typeof getPreset>; scope: string; signal?: AbortSignal }) {
-      const adapter = getAdapter(request.preset.adapter);
+      const adapter = resolvePresetEvidenceProvider(request.preset);
       return adapter.discover({ scope: request.scope, mode: "candidates", signal: request.signal });
     },
     async runStage(request: {
@@ -911,14 +1002,15 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
       rescreen?: boolean;
       signal?: AbortSignal;
     }) {
-      const input = exactPresetStageInput(request.preset, request.stage, request.items, {
+      const unresolvedInput = exactPresetStageInput(request.preset, request.stage, request.items, {
         confirm: request.confirm,
         provider: request.provider,
         model: request.model,
         rescreen: request.rescreen,
       });
-      const screened = await runWithScreeningCache(input, resultCache, () =>
-        classifyBatch(input, createBackend(request.signal ?? signal), {
+      const resolved = await resolveClassifierInput(unresolvedInput, request.signal ?? signal);
+      const screened = await runWithClassificationCache(resolved.input, resolved.identity, classificationCache, (missInput) =>
+        classifyBatch(missInput, createBackend(request.signal ?? signal), {
           callLimit: parsePositiveEnvInt("PI_SEMANTIC_SCREEN_CALL_LIMIT", 200, 100_000),
           concurrency: parsePositiveEnvInt("PI_SEMANTIC_SCREEN_CONCURRENCY", 12, 64),
           contextSafetyFraction: 0.85,
@@ -931,12 +1023,16 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
       return screened;
     },
     startReview(request: { preset: ReturnType<typeof getPreset>; scope: string; reviewTargetIds: string[] }) {
-      return reviewWorkflows.start({
+      const started = reviewWorkflows.start({
         preset: request.preset.id,
         scope: request.scope,
         reviewTargetIds: request.reviewTargetIds,
         targetItems: request.preset.evidence.targetItems,
       });
+      if (started.status === "ok" && started.workflowId) {
+        reviewPresetSnapshots.set(started.workflowId, structuredClone(request.preset));
+      }
+      return started;
     },
   });
 
@@ -944,8 +1040,9 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
     semanticScreenWorkflowActive = false;
     compactionInFlight = false;
     reviewWorkflows.reset();
+    reviewPresetSnapshots.clear();
     presetScreeningWorkflows.reset();
-    resultCache.clear();
+    classificationCache.clear();
   });
 
   pi.on("before_agent_start", (event) => {
@@ -998,7 +1095,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
     name: "screen_preset",
     label: "Semantic screen preset",
     description:
-      "List semantic-screen presets or return one preset's adapter, classifier stages, review instructions, and evidence limits.",
+      "List semantic-screen presets or return one preset's evidence-provider selection, classifier stages, review instructions, and evidence limits.",
     promptSnippet: "Load a semantic-screen preset before discovery",
     parameters: presetParameters,
     outputSchema: presetOutputSchema,
@@ -1028,8 +1125,8 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
     name: "screen_discover",
     label: "Semantic screen discovery",
     description:
-      "Run deterministic candidate discovery through a preset adapter. Count mode returns only a count; candidates mode returns stable id/text items for screen_batch.",
-    promptSnippet: "Discover semantic-screen candidates through a deterministic adapter",
+      "Run deterministic candidate discovery through a preset evidence provider. Count mode returns only a count; candidates mode returns stable id/text items for screen_batch.",
+    promptSnippet: "Discover semantic-screen candidates through a deterministic evidence provider",
     parameters: discoverParameters,
     outputSchema: discoverOutputSchema,
     annotations: {
@@ -1041,7 +1138,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params, signal) {
       const request = params as { preset: string; scope: string; mode: "count" | "candidates" };
       const preset = getPreset(request.preset);
-      const adapter = getAdapter(preset.adapter);
+      const adapter = resolvePresetEvidenceProvider(preset);
       const result = await adapter.discover({ scope: request.scope, mode: request.mode, signal });
       const structuredResult = { ...result, preset: preset.id };
       const text =
@@ -1082,6 +1179,11 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         rescreen?: boolean;
       };
       const preset = getPreset(request.preset);
+      const selectedClassifier = await resolveClassifierModel(await getRuntime(), {
+        provider: request.provider,
+        model: request.model,
+        signal,
+      });
       let screenedAccounting: ScreeningResult["classifierAccounting"];
       let screenedReused = false;
       const result = await presetScreeningWorkflows.startPrimary(
@@ -1090,8 +1192,8 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
           scope: request.scope,
           confirm: request.confirm === true,
           deferReview: request.deferReview,
-          provider: request.provider,
-          model: request.model,
+          provider: selectedClassifier.provider,
+          model: selectedClassifier.id,
           rescreen: request.rescreen,
           signal,
         },
@@ -1169,7 +1271,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
     name: "screen_evidence",
     label: "Semantic screen evidence",
     description:
-      "Build one deterministic bounded semantic-review evidence packet for stable candidate ids through the preset adapter.",
+      "Build one deterministic bounded semantic-review evidence packet for stable candidate ids through the preset evidence provider.",
     promptSnippet: "Fetch bounded source evidence for semantic-screen review targets",
     parameters: evidenceParameters,
     outputSchema: evidenceOutputSchema,
@@ -1269,6 +1371,9 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         reviewTargetIds: request.reviewTargetIds,
         targetItems: preset.evidence.targetItems,
       });
+      if (result.status === "ok" && result.workflowId) {
+        reviewPresetSnapshots.set(result.workflowId, structuredClone(preset));
+      }
       const text = result.status === "ok"
         ? `screen_review_start: workflow=${result.workflowId}, preset=${preset.id}, targets=${result.progress?.reviewTarget ?? 0}`
         : `screen_review_start: failed with ${result.issues.length} issue(s)`;
@@ -1298,8 +1403,15 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params, signal) {
       const request = params as { workflowId?: string };
       const result = await reviewWorkflows.next(request.workflowId, async (packetRequest) =>
-        buildEvidencePacket({ ...packetRequest, signal }),
+        buildEvidencePacket({
+          ...packetRequest,
+          presetDefinition: reviewPresetSnapshots.get(packetRequest.workflowId),
+          signal,
+        }),
       );
+      if (result.workflowId && (result.status === "complete" || result.status === "review_complete_with_blocked_evidence")) {
+        reviewPresetSnapshots.delete(result.workflowId);
+      }
       const text = JSON.stringify(result);
       return {
         content: [{ type: "text", text }],
@@ -1331,6 +1443,9 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         dispositions: ReviewDecisionInput[];
       };
       const result = reviewWorkflows.commit(request);
+      if (result.workflowId && (result.status === "complete" || result.status === "review_complete_with_blocked_evidence")) {
+        reviewPresetSnapshots.delete(result.workflowId);
+      }
       const text = JSON.stringify(result);
       return {
         content: [{ type: "text", text }],
@@ -1388,8 +1503,12 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
     },
     async execute(_toolCallId, params, signal) {
       const input = params as ScreeningInput;
-      const { result, reused } = await runWithScreeningCache(input, resultCache, () =>
-        classifyBatch(input, createBackend(signal), {
+      const resolved = await resolveClassifierInput(input, signal);
+      const { result, reused, cacheHits, cacheMisses } = await runWithClassificationCache(
+        resolved.input,
+        resolved.identity,
+        classificationCache,
+        (missInput) => classifyBatch(missInput, createBackend(signal), {
           callLimit: parsePositiveEnvInt("PI_SEMANTIC_SCREEN_CALL_LIMIT", 200, 100_000),
           concurrency: parsePositiveEnvInt("PI_SEMANTIC_SCREEN_CONCURRENCY", 12, 64),
           contextSafetyFraction: 0.85,
@@ -1398,7 +1517,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
           signal,
         }),
       );
-      const structuredResult = { ...result, reused };
+      const structuredResult = { ...result, reused, cacheHits, cacheMisses };
       const accounting = result.classifierAccounting;
       const toolUsage =
         !reused && accounting?.complete && accounting.calls > 0 && accounting.usage
@@ -1408,7 +1527,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
       const humanSummary =
         result.status === "approval_required"
           ? `screen_batch requires confirmation: ${result.projectedCalls} classifier calls exceed limit ${result.callLimit}; zero classifier calls were made.`
-          : `screen_batch: kept=${result.summary.kept}, dropped=${result.summary.dropped}, undecided=${result.summary.undecided}, withheld=${result.summary.withheld}, errors=${result.summary.errors}${result.model ? ` via ${result.model.provider}/${result.model.id}` : ""}${reused ? "; reused prior successful screening with zero classifier calls" : ""}.`;
+          : `screen_batch: kept=${result.summary.kept}, dropped=${result.summary.dropped}, undecided=${result.summary.undecided}, withheld=${result.summary.withheld}, errors=${result.summary.errors}${result.model ? ` via ${result.model.provider}/${result.model.id}` : ""}${reused ? "; reused prior semantic classification with zero classifier calls" : `; cacheHits=${cacheHits}, cacheMisses=${cacheMisses}`}.`;
 
       return {
         content: [{ type: "text", text: humanSummary }],
@@ -1416,6 +1535,8 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
           classifierModel: result.model ?? null,
           classifierAccounting: accounting ?? null,
           reused,
+          cacheHits,
+          cacheMisses,
         },
         structuredContent: structuredResult as unknown as JsonValue,
         ...(toolUsage ? { usage: toolUsage } : {}),
