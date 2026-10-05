@@ -24,6 +24,8 @@ export interface GenericSourceWindow {
 export interface GenericSourceProviderConfig {
   include: string[];
   exclude?: string[];
+  /** Directory names to skip in addition to source-control metadata directories. */
+  skipDirs?: string[];
   patterns: GenericSourcePattern[];
   candidate?: GenericSourceWindow;
   evidence?: {
@@ -56,7 +58,7 @@ interface LocatedCandidate extends EvidenceCandidate {
   file: SourceFile;
 }
 
-const DEFAULT_SKIP_DIRS = new Set([".git", ".hg", ".svn", "node_modules", "dist", "build", "coverage", ".venv", "venv"]);
+const DEFAULT_SKIP_DIRS = new Set([".git", ".hg", ".svn"]);
 const DEFAULT_LIMITS = { maxFiles: 10_000, maxFileBytes: 1_000_000, maxCandidates: 100_000 };
 const DEFAULT_CANDIDATE_WINDOW = { beforeLines: 1, afterLines: 4, maxChars: 3_000 };
 const DEFAULT_STANDARD_WINDOW = { beforeLines: 4, afterLines: 12, maxChars: 10_000 };
@@ -128,6 +130,16 @@ function validateConfig(config: GenericSourceProviderConfig): void {
   if (ids.some((id) => !id?.trim()) || new Set(ids).size !== ids.length) {
     throw new Error("generic-source pattern ids must be non-empty and unique");
   }
+  if (config.skipDirs !== undefined) {
+    if (!Array.isArray(config.skipDirs) || config.skipDirs.some((name) => !name?.trim())) {
+      throw new Error("generic-source skipDirs must contain non-empty directory names");
+    }
+    for (const name of config.skipDirs) {
+      if (name === "." || name === ".." || name.includes("/") || name.includes("\\")) {
+        throw new Error(`generic-source skipDirs entries must be directory names, not paths: ${name}`);
+      }
+    }
+  }
   compilePatterns(config);
   windowConfig(config.candidate, DEFAULT_CANDIDATE_WINDOW);
   windowConfig(config.evidence?.standard, DEFAULT_STANDARD_WINDOW);
@@ -140,47 +152,57 @@ function validateConfig(config: GenericSourceProviderConfig): void {
 async function sourceFiles(scope: string, config: GenericSourceProviderConfig, signal?: AbortSignal): Promise<SourceFile[]> {
   const root = path.resolve(scope);
   const rootStat = await stat(root);
-  if (!rootStat.isDirectory()) throw new Error(`scope is not a directory: ${scope}`);
   const include = config.include.map(globToRegExp);
   const exclude = (config.exclude ?? []).map(globToRegExp);
+  const skipDirs = new Set([...DEFAULT_SKIP_DIRS, ...(config.skipDirs ?? [])]);
   const maxFiles = boundedInt(config.limits?.maxFiles, DEFAULT_LIMITS.maxFiles, 1, 100_000);
   const maxFileBytes = boundedInt(config.limits?.maxFileBytes, DEFAULT_LIMITS.maxFileBytes, 1, 20_000_000);
-  const files: string[] = [];
+  const files: Array<{ absolute: string; relative: string }> = [];
 
-  async function walk(dir: string): Promise<void> {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const entries = await readdir(dir, { withFileTypes: true });
-    entries.sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of entries) {
-      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      const absolute = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!DEFAULT_SKIP_DIRS.has(entry.name)) await walk(absolute);
-        continue;
-      }
-      if (!entry.isFile()) continue;
-      const relative = normalizedSlash(path.relative(root, absolute));
-      if (!include.some((pattern) => pattern.test(relative))) continue;
-      if (exclude.some((pattern) => pattern.test(relative))) continue;
-      files.push(absolute);
-      if (files.length > maxFiles) throw new Error(`generic-source file limit exceeded: ${maxFiles}`);
-    }
+  function selected(relative: string): boolean {
+    return include.some((pattern) => pattern.test(relative)) && !exclude.some((pattern) => pattern.test(relative));
   }
 
-  await walk(root);
-  const loaded: SourceFile[] = [];
-  for (const absolute of files) {
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const fileStat = await stat(absolute);
-    if (fileStat.size > maxFileBytes) {
-      const relative = normalizedSlash(path.relative(root, absolute));
-      throw new Error(`generic-source file exceeds maxFileBytes (${maxFileBytes}): ${relative} (${fileStat.size})`);
+  if (rootStat.isFile()) {
+    const relative = normalizedSlash(path.basename(root));
+    if (selected(relative)) files.push({ absolute: root, relative });
+  } else if (rootStat.isDirectory()) {
+    async function walk(dir: string): Promise<void> {
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      const entries = await readdir(dir, { withFileTypes: true });
+      entries.sort((a, b) => a.name.localeCompare(b.name));
+      for (const entry of entries) {
+        if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+        const absolute = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!skipDirs.has(entry.name)) await walk(absolute);
+          continue;
+        }
+        if (!entry.isFile()) continue;
+        const relative = normalizedSlash(path.relative(root, absolute));
+        if (!selected(relative)) continue;
+        files.push({ absolute, relative });
+        if (files.length > maxFiles) throw new Error(`generic-source file limit exceeded: ${maxFiles}`);
+      }
     }
-    const text = await readFile(absolute, "utf8");
+    await walk(root);
+  } else {
+    throw new Error(`scope is neither a regular file nor a directory: ${scope}`);
+  }
+
+  if (files.length > maxFiles) throw new Error(`generic-source file limit exceeded: ${maxFiles}`);
+  const loaded: SourceFile[] = [];
+  for (const file of files) {
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const fileStat = await stat(file.absolute);
+    if (fileStat.size > maxFileBytes) {
+      throw new Error(`generic-source file exceeds maxFileBytes (${maxFileBytes}): ${file.relative} (${fileStat.size})`);
+    }
+    const text = await readFile(file.absolute, "utf8");
     const lines = text.split(/\r?\n/);
     const lineStarts: number[] = [0];
     for (let i = 0; i < text.length; i += 1) if (text.charCodeAt(i) === 10) lineStarts.push(i + 1);
-    loaded.push({ relative: normalizedSlash(path.relative(root, absolute)), absolute, text, lines, lineStarts });
+    loaded.push({ relative: file.relative, absolute: file.absolute, text, lines, lineStarts });
   }
   return loaded;
 }

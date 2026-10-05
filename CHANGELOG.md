@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0 - 2026-10-05
+
+- Make review dispositions preset-owned instead of hard-coding silent-fallback/exception outcomes in the generic core. Compact presets now use neutral `CONFIRM`, `REJECT`, and `INSUFFICIENT_EVIDENCE`; specialized presets may add their own terminal non-finding dispositions.
+- Make review tool schemas and disposition accounting dynamic so new semantic domains do not require extension code changes.
+- Keep the existing exception-specific vocabulary only inside the feature-frozen `python-exceptions` preset.
+- Add literal compact discovery with `source.find`; keep regex `source.match` as the advanced text-discovery option. Allow scalar `source.include` and single-file scope for simpler use.
+- Remove ecosystem-specific default skip directories from `generic-source`; only source-control metadata directories are skipped by default, while presets may add explicit `skipDirs`.
+- Add absolute `reviewAvoided` alongside `reviewAvoidanceRate` so the classifier-first benefit is visible as both count and rate.
+- Explicitly keep language parsers, AST/dataflow, call graphs, and the proposed `local_callers` implementation out of 0.8.0. A future structural capability must be language-neutral at the contract boundary and fail closed when no resolver is available.
+- Preserve canonical discovery, classifier cache, primary manifest, standard-to-expanded review escalation, exact accounting, approval gating, and the Python extractor implementation.
+
 ## 0.7.4 - 2026-10-04
 
 - Add read-only `screen_primary_manifest` observability for completed canonical primary runs, filterable by `KEEP`, `DROP`, `UNDECIDED`, `WITHHELD`, and `ERROR` with pagination.

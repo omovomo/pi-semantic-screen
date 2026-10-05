@@ -88,7 +88,7 @@ Providers report facts. They must not decide whether those facts are semanticall
 
 ## Declarative / adapter-light path
 
-0.7 deliberately does **not** add a universal AST/dataflow framework. The first generic provider is `generic-source`, which gives a bounded deterministic vocabulary:
+The project deliberately does **not** add a universal AST/dataflow framework. The first generic provider is `generic-source`, which gives a bounded deterministic vocabulary:
 
 - include/exclude source globs;
 - regex discovery patterns;
@@ -143,7 +143,7 @@ Every canonical primary start performs deterministic discovery again and creates
 
 ## Classification cache boundary
 
-0.7.1 makes per-candidate semantic reuse reachable from the canonical flow: primary initialization never skips rediscovery because an earlier workflow exists.
+Per-candidate semantic reuse is reachable from the canonical flow: primary initialization never skips rediscovery because an earlier workflow exists.
 
 The cache key is derived from:
 

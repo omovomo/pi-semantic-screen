@@ -7,6 +7,13 @@ export interface ScreeningStagePreset {
   threshold: number;
 }
 
+export interface ReviewDispositionPreset {
+  id: string;
+  terminal: boolean;
+  finding: boolean;
+  description: string;
+}
+
 export interface ScreeningPreset {
   id: string;
   label: string;
@@ -21,6 +28,7 @@ export interface ScreeningPreset {
     instructions: string;
     confirmWhen: string;
     rejectWhen: string;
+    dispositions?: ReviewDispositionPreset[];
   };
   evidence: {
     targetItems: number;

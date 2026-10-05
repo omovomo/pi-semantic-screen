@@ -1,7 +1,4 @@
-import {
-  REVIEW_DISPOSITION_IDS,
-  type ReviewDispositionId,
-} from "./review-contract.ts";
+import { genericReviewContract, type ReviewContract, type ReviewDispositionId } from "./review-contract.ts";
 import {
   applyReviewDispositions,
   normalizeReviewDecisions,
@@ -63,9 +60,9 @@ export interface ReviewWorkflowNextResult {
   findings?: ReviewFindingItem[];
   blockedEvidence?: ReviewBlockedItem[];
   /** @deprecated Use dispositionEventCounts for review attempts or finalDispositionCounts for terminal per-candidate outcomes. */
-  dispositionCounts?: Record<ReviewDispositionId, number>;
-  dispositionEventCounts?: Record<ReviewDispositionId, number>;
-  finalDispositionCounts?: Record<ReviewDispositionId, number>;
+  dispositionCounts?: Record<string, number>;
+  dispositionEventCounts?: Record<string, number>;
+  finalDispositionCounts?: Record<string, number>;
   issues: string[];
 }
 
@@ -79,9 +76,9 @@ export interface ReviewWorkflowCommitResult {
   findings?: ReviewFindingItem[];
   blockedEvidence?: ReviewBlockedItem[];
   /** @deprecated Use dispositionEventCounts for review attempts or finalDispositionCounts for terminal per-candidate outcomes. */
-  dispositionCounts?: Record<ReviewDispositionId, number>;
-  dispositionEventCounts?: Record<ReviewDispositionId, number>;
-  finalDispositionCounts?: Record<ReviewDispositionId, number>;
+  dispositionCounts?: Record<string, number>;
+  dispositionEventCounts?: Record<string, number>;
+  finalDispositionCounts?: Record<string, number>;
   issues: string[];
 }
 
@@ -111,7 +108,8 @@ interface ReviewWorkflowState {
   needsExpandedEvidenceIds: Set<string>;
   blockedEvidence: Map<string, string>;
   findings: Map<string, string>;
-  dispositionEventCounts: Record<ReviewDispositionId, number>;
+  reviewContract: ReviewContract;
+  dispositionEventCounts: Record<string, number>;
   finalDispositions: Map<string, ReviewDispositionId>;
   standardReviewed: number;
   standardResolved: number;
@@ -122,8 +120,8 @@ interface ReviewWorkflowState {
   nextPacketSequence: number;
 }
 
-function emptyDispositionCounts(): Record<ReviewDispositionId, number> {
-  return Object.fromEntries(REVIEW_DISPOSITION_IDS.map((id) => [id, 0])) as Record<ReviewDispositionId, number>;
+function emptyDispositionCounts(contract: ReviewContract): Record<string, number> {
+  return Object.fromEntries(contract.dispositions.map((entry) => [entry.id, 0]));
 }
 
 function exactItemCoverage(packet: ReviewEvidencePacket): string[] {
@@ -155,9 +153,11 @@ export class ReviewWorkflowManager {
     scope: string;
     reviewTargetIds: string[];
     targetItems: number;
+    reviewContract?: ReviewContract;
   }): ReviewWorkflowStartResult {
     const issues: string[] = [];
     const targetIds = [...input.reviewTargetIds];
+    const reviewContract = input.reviewContract ?? genericReviewContract();
     if (!input.preset.trim()) issues.push("preset must not be empty");
     if (!input.scope.trim()) issues.push("scope must not be empty");
     if (!Number.isInteger(input.targetItems) || input.targetItems < 1) issues.push("targetItems must be a positive integer");
@@ -179,7 +179,8 @@ export class ReviewWorkflowManager {
       needsExpandedEvidenceIds: new Set(),
       blockedEvidence: new Map(),
       findings: new Map(),
-      dispositionEventCounts: emptyDispositionCounts(),
+      reviewContract: structuredClone(reviewContract),
+      dispositionEventCounts: emptyDispositionCounts(reviewContract),
       finalDispositions: new Map(),
       standardReviewed: 0,
       standardResolved: 0,
@@ -312,6 +313,7 @@ export class ReviewWorkflowManager {
       packetIds: pending.packet.packetIds,
       detail: pending.detail,
       dispositions: decisions,
+      contract: state.reviewContract,
     });
     if (applied.status !== "ok") {
       return {
@@ -331,8 +333,8 @@ export class ReviewWorkflowManager {
     for (const id of applied.needsExpandedEvidenceIds) state.needsExpandedEvidenceIds.add(id);
     for (const blocked of applied.blockedEvidence) state.blockedEvidence.set(blocked.id, blocked.rationale);
     for (const finding of applied.findings) state.findings.set(finding.id, finding.rationale);
-    for (const disposition of REVIEW_DISPOSITION_IDS) {
-      state.dispositionEventCounts[disposition] += applied.dispositionCounts[disposition];
+    for (const disposition of state.reviewContract.dispositions) {
+      state.dispositionEventCounts[disposition.id] += applied.dispositionCounts[disposition.id] ?? 0;
     }
     for (const decision of decisions) {
       if (decision.disposition !== "INSUFFICIENT_EVIDENCE" || pending.detail === "expanded") {
@@ -412,8 +414,8 @@ export class ReviewWorkflowManager {
       .map((id) => ({ id, rationale: state.findings.get(id)! }));
   }
 
-  private finalDispositionCounts(state: ReviewWorkflowState): Record<ReviewDispositionId, number> {
-    const counts = emptyDispositionCounts();
+  private finalDispositionCounts(state: ReviewWorkflowState): Record<string, number> {
+    const counts = emptyDispositionCounts(state.reviewContract);
     for (const id of state.reviewTargetIds) {
       const disposition = state.finalDispositions.get(id);
       if (disposition) counts[disposition] += 1;

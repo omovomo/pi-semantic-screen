@@ -73,11 +73,12 @@ test("semantic review loop uses next and atomic commit, not model-owned state me
   assert.match(skill, /at most three distinct packets or roughly 100-120 semantic dispositions/i);
 });
 
-test("review contract explicitly stabilizes authoritative-record omission", () => {
-  assert.match(skill, /malformed authoritative record is skipped from a normally returned authoritative collection/i);
-  assert.match(skill, /`CONFIRM` applies unless that specific omission is positively shown to be permitted or surfaced/i);
-  assert.match(skill, /Do not require proof that no unshown reporting mechanism exists/i);
-  assert.match(skill, /empty\/default domain object after an authoritative persisted-state read\/parse failure/i);
+test("generic skill treats the current preset review contract as authoritative", () => {
+  assert.match(skill, /Each evidence packet carries the exact preset-owned `reviewContract`/i);
+  assert.match(skill, /Compact presets use the neutral `CONFIRM` \/ `REJECT` \/ `INSUFFICIENT_EVIDENCE` contract/i);
+  assert.match(skill, /Advanced presets may define additional terminal dispositions/i);
+  assert.doesNotMatch(skill, /malformed authoritative record is skipped from a normally returned authoritative collection/i);
+  assert.doesNotMatch(skill, /empty\/default domain object after an authoritative persisted-state read\/parse failure/i);
 });
 
 test("screen-use uses extension-owned primary/refinement initialization", () => {

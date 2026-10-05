@@ -4,7 +4,7 @@ import type { GenericSourcePattern, GenericSourceProviderConfig } from "../provi
 import type { EvidenceProviderSpec } from "../providers/spec.ts";
 import type { ScreeningPreset, ScreeningStagePreset } from "./types.ts";
 
-export const SIMPLE_PRESET_DEFAULTS_VERSION = 1;
+export const SIMPLE_PRESET_DEFAULTS_VERSION = 2;
 
 const SIMPLE_PRIMARY_THRESHOLD = 0.70;
 const SIMPLE_EVIDENCE_DEFAULTS = {
@@ -70,6 +70,15 @@ function optionalStringArray(value: unknown, where: string): string[] | undefine
   return value === undefined ? undefined : stringArray(value, where);
 }
 
+function stringOrArray(value: unknown, where: string): string[] {
+  if (typeof value === "string") return [string(value, where)];
+  return stringArray(value, where);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function simpleDropHints(value: unknown, where: string): string[] {
   if (value === undefined) return [];
   const hints = stringArray(value, where);
@@ -106,8 +115,9 @@ function genericSourceConfig(value: unknown, where: string): GenericSourceProvid
   const evidenceInput = input.evidence === undefined ? undefined : object(input.evidence, `${where}.evidence`);
   const limitsInput = input.limits === undefined ? undefined : object(input.limits, `${where}.limits`);
   return {
-    include: stringArray(input.include, `${where}.include`),
+    include: typeof input.include === "string" ? [string(input.include, `${where}.include`)] : stringArray(input.include, `${where}.include`),
     ...(input.exclude === undefined ? {} : { exclude: stringArray(input.exclude, `${where}.exclude`) }),
+    ...(input.skipDirs === undefined ? {} : { skipDirs: stringArray(input.skipDirs, `${where}.skipDirs`) }),
     patterns,
     ...(input.candidate === undefined ? {} : { candidate: parseWindow(input.candidate, `${where}.candidate`) }),
     ...(evidenceInput === undefined
@@ -156,14 +166,35 @@ function simplePattern(value: unknown, index: number, where: string): GenericSou
   };
 }
 
+function escapeRegexLiteral(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function simpleLiteralPattern(value: unknown, index: number, where: string): GenericSourcePattern {
+  const literal = string(value, `${where}[${index}]`);
+  return { id: `find-${index + 1}`, regex: escapeRegexLiteral(literal), label: literal };
+}
+
 function simpleSource(value: unknown, where: string): GenericSourceProviderConfig {
   const input = object(value, where);
-  if (!Array.isArray(input.match) || input.match.length === 0) throw new Error(`${where}.match must be a non-empty array`);
+  const rawFind = input.find;
+  const rawMatch = input.match;
+  if (rawFind === undefined && rawMatch === undefined) {
+    throw new Error(`${where} must contain find and/or match`);
+  }
+  const findEntries = rawFind === undefined ? [] : (Array.isArray(rawFind) ? rawFind : [rawFind]);
+  const matchEntries = rawMatch === undefined ? [] : (Array.isArray(rawMatch) ? rawMatch : [rawMatch]);
+  if (rawFind !== undefined && findEntries.length === 0) throw new Error(`${where}.find must not be empty`);
+  if (rawMatch !== undefined && matchEntries.length === 0) throw new Error(`${where}.match must not be empty`);
   const exclude = optionalStringArray(input.exclude, `${where}.exclude`);
+  const skipDirs = optionalStringArray(input.skipDirs, `${where}.skipDirs`);
+  const findPatterns = findEntries.map((entry, index) => simpleLiteralPattern(entry, index, `${where}.find`));
+  const matchPatterns = matchEntries.map((entry, index) => simplePattern(entry, index, `${where}.match`));
   return {
-    include: stringArray(input.include, `${where}.include`),
+    include: typeof input.include === "string" ? [string(input.include, `${where}.include`)] : stringArray(input.include, `${where}.include`),
     ...(exclude ? { exclude } : {}),
-    patterns: input.match.map((entry, index) => simplePattern(entry, index, `${where}.match`)),
+    ...(skipDirs ? { skipDirs } : {}),
+    patterns: [...findPatterns, ...matchPatterns],
     candidate: { ...SIMPLE_SOURCE_DEFAULTS.candidate },
     evidence: {
       standard: { ...SIMPLE_SOURCE_DEFAULTS.standard },
@@ -183,6 +214,22 @@ function simpleEvidence(value: unknown, where: string): ScreeningPreset["evidenc
     maxChars: input.maxChars === undefined ? SIMPLE_EVIDENCE_DEFAULTS.maxChars : integer(input.maxChars, `${where}.maxChars`, 1, 10_000_000),
     maxTokens: input.maxTokens === undefined ? SIMPLE_EVIDENCE_DEFAULTS.maxTokens : integer(input.maxTokens, `${where}.maxTokens`, 1, 1_000_000),
   };
+}
+
+function reviewDispositions(value: unknown, where: string): ScreeningPreset["review"]["dispositions"] {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${where} must be a non-empty array`);
+  return value.map((entry, index) => {
+    const item = object(entry, `${where}[${index}]`);
+    if (typeof item.terminal !== "boolean") throw new Error(`${where}[${index}].terminal must be boolean`);
+    if (typeof item.finding !== "boolean") throw new Error(`${where}[${index}].finding must be boolean`);
+    return {
+      id: string(item.id, `${where}[${index}].id`),
+      terminal: item.terminal,
+      finding: item.finding,
+      description: string(item.description, `${where}[${index}].description`),
+    };
+  });
 }
 
 function parseSimplePreset(input: Record<string, unknown>, source: string): ScreeningPreset {
@@ -234,6 +281,7 @@ function parseAdvancedPreset(input: Record<string, unknown>, source: string): Sc
   const review = object(input.review, `${source}.review`);
   const evidence = object(input.evidence, `${source}.evidence`);
   const id = string(input.id, `${source}.id`);
+  const dispositions = reviewDispositions(review.dispositions, `${source}.review.dispositions`);
   return {
     id,
     label: string(input.label, `${source}.label`),
@@ -246,6 +294,7 @@ function parseAdvancedPreset(input: Record<string, unknown>, source: string): Sc
       instructions: string(review.instructions, `${source}.review.instructions`),
       confirmWhen: string(review.confirmWhen, `${source}.review.confirmWhen`),
       rejectWhen: string(review.rejectWhen, `${source}.review.rejectWhen`),
+      ...(dispositions ? { dispositions } : {}),
     },
     evidence: {
       targetItems: integer(evidence.targetItems, `${source}.evidence.targetItems`, 1, 10_000),

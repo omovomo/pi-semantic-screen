@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -112,7 +112,7 @@ test("0.7.1 compact preset normalizes deterministic classifier, review, and budg
     question: "Can a required operation failure become apparently valid default behavior?",
   }, "compact-test");
 
-  assert.equal(SIMPLE_PRESET_DEFAULTS_VERSION, 1);
+  assert.equal(SIMPLE_PRESET_DEFAULTS_VERSION, 2);
   assert.equal(preset.id, "compact-audit");
   assert.equal(preset.label, "compact-audit");
   assert.equal(preset.adapter, "generic-source");
@@ -224,4 +224,90 @@ test("0.7.1 compact preset rejects ambiguous mixing with advanced provider/prima
     question: "question",
     provider: { kind: "builtin", id: "python-exceptions" },
   }, "mixed-test"), /cannot mix source\/question with provider\/primary\/refinement/);
+});
+
+test("0.8 compact preset supports literal source.find and scalar include", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "semantic-screen-literal-"));
+  try {
+    const file = path.join(root, "sample.txt");
+    writeFileSync(file, "alpha [literal] beta\n", "utf8");
+    const preset = parseDeclarativePreset({
+      id: "literal-find",
+      source: { include: "**/*.txt", find: "[literal]" },
+      question: "Does this candidate satisfy the requested property?",
+    }, "literal-find-test");
+    const provider = resolvePresetEvidenceProvider(preset);
+    const discovered = await provider.discover({ scope: file, mode: "candidates" });
+    assert.equal(discovered.status, "ok");
+    assert.equal(discovered.total, 1);
+    assert.equal(discovered.items?.[0]?.source, "sample.txt");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test("0.8 compact preset supports literal find without regex escaping", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "semantic-screen-find-"));
+  try {
+    const file = path.join(root, "sample.txt");
+    writeFileSync(file, "call(a+b)\ncall(aaab)\n", "utf8");
+    const preset = parseDeclarativePreset({
+      id: "literal-find",
+      source: { include: ["**/*.txt"], find: ["call(a+b)"] },
+      question: "Does this line match the literal marker?",
+    }, "literal-find-test");
+    if (preset.provider?.kind !== "generic-source") assert.fail("expected generic-source provider");
+    assert.equal(preset.provider.config.patterns[0].id, "find-1");
+    const provider = resolvePresetEvidenceProvider(preset);
+    const result = await provider.discover({ scope: root, mode: "candidates" });
+    assert.equal(result.status, "ok");
+    assert.equal(result.total, 1);
+    assert.match(result.items?.[0]?.text ?? "", /call\(a\+b\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("0.8 generic-source accepts a single file scope", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "semantic-screen-file-"));
+  try {
+    const file = path.join(root, "sample.txt");
+    writeFileSync(file, "candidate\n", "utf8");
+    const provider = createGenericSourceProvider("single-file", {
+      include: ["**/*.txt"],
+      patterns: [{ id: "candidate", regex: "candidate" }],
+    });
+    const result = await provider.discover({ scope: file, mode: "candidates" });
+    assert.equal(result.status, "ok");
+    assert.equal(result.total, 1);
+    assert.equal(result.items?.[0]?.source, "sample.txt");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("0.8 generic-source has no ecosystem skip policy; projects opt in with skipDirs", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "semantic-screen-skip-"));
+  try {
+    mkdirSync(path.join(root, "node_modules"));
+    writeFileSync(path.join(root, "root.ts"), "candidate\n", "utf8");
+    writeFileSync(path.join(root, "node_modules", "dep.ts"), "candidate\n", "utf8");
+    const base = {
+      include: ["**/*.ts"],
+      patterns: [{ id: "candidate", regex: "candidate" }],
+    };
+    const unfiltered = createGenericSourceProvider("unfiltered", base);
+    const all = await unfiltered.discover({ scope: root, mode: "candidates" });
+    assert.equal(all.status, "ok");
+    assert.equal(all.total, 2);
+
+    const filtered = createGenericSourceProvider("filtered", { ...base, skipDirs: ["node_modules"] });
+    const selected = await filtered.discover({ scope: root, mode: "candidates" });
+    assert.equal(selected.status, "ok");
+    assert.equal(selected.total, 1);
+    assert.equal(selected.items?.[0]?.source, "root.ts");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

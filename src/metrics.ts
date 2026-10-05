@@ -26,6 +26,7 @@ export interface ScreeningEfficiencyMetrics {
   withheld: number;
   errors: number;
   primaryReductionRate: number;
+  reviewAvoided: number;
   reviewAvoidanceRate: number;
   primaryCacheHitRate: number;
   classifierInputTokens?: number;
@@ -51,6 +52,7 @@ export function buildScreeningEfficiency(input: PrimaryEfficiencyInput): Screeni
     withheld: input.withheld,
     errors: input.errors,
     primaryReductionRate: ratio(input.dropped, input.total),
+    reviewAvoided: input.total - input.retained,
     reviewAvoidanceRate: ratio(input.total - input.retained, input.total),
     primaryCacheHitRate: ratio(input.cacheHits, input.total),
     ...(input.usage

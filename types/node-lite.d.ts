@@ -45,7 +45,7 @@ declare module "node:fs/promises" {
   }
   export function readdir(path: string, options: { withFileTypes: true }): Promise<Dirent[]>;
   export function readFile(path: string, encoding: string): Promise<string>;
-  export function stat(path: string): Promise<{ isDirectory(): boolean; size: number }>;
+  export function stat(path: string): Promise<{ isDirectory(): boolean; isFile(): boolean; size: number }>;
 }
 
 declare module "node:path" {
@@ -53,4 +53,5 @@ declare module "node:path" {
   export function resolve(...paths: string[]): string;
   export function relative(from: string, to: string): string;
   export function join(...paths: string[]): string;
+  export function basename(path: string): string;
 }

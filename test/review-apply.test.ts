@@ -8,7 +8,7 @@ test("review apply validates exact coverage and returns deterministic standard d
     detail: "standard",
     dispositions: [
       { id: "a", disposition: "CONFIRM", rationale: "core result silently defaults" },
-      { id: "b", disposition: "UI_ONLY", rationale: "display-only stale label" },
+      { id: "b", disposition: "REJECT", rationale: "display-only stale label" },
       { id: "c", disposition: "INSUFFICIENT_EVIDENCE", rationale: "downstream use not shown" },
     ],
   });
@@ -19,7 +19,7 @@ test("review apply validates exact coverage and returns deterministic standard d
   assert.deepEqual(result.blockedEvidence, []);
   assert.deepEqual(result.findings, [{ id: "a", rationale: "core result silently defaults" }]);
   assert.equal(result.dispositionCounts.CONFIRM, 1);
-  assert.equal(result.dispositionCounts.UI_ONLY, 1);
+  assert.equal(result.dispositionCounts.REJECT, 1);
   assert.equal(result.dispositionCounts.INSUFFICIENT_EVIDENCE, 1);
 });
 
@@ -29,7 +29,7 @@ test("review apply quarantines expanded insufficient evidence per id", () => {
     detail: "expanded",
     dispositions: [
       { id: "a", disposition: "INSUFFICIENT_EVIDENCE", rationale: "data-flow remains ambiguous" },
-      { id: "b", disposition: "EXPLICIT_FAILURE", rationale: "caller receives explicit unavailable state" },
+      { id: "b", disposition: "REJECT", rationale: "caller receives explicit unavailable state" },
     ],
   });
   assert.equal(result.status, "ok");
@@ -42,7 +42,7 @@ test("review apply fails closed on missing, duplicate, or extra disposition ids"
   const missing = applyReviewDispositions({
     packetIds: ["a", "b"],
     detail: "standard",
-    dispositions: [{ id: "a", disposition: "UI_ONLY", rationale: "ui" }],
+    dispositions: [{ id: "a", disposition: "REJECT", rationale: "ui" }],
   });
   assert.equal(missing.status, "error");
   assert.deepEqual(missing.reviewedIds, []);
@@ -52,8 +52,8 @@ test("review apply fails closed on missing, duplicate, or extra disposition ids"
     packetIds: ["a"],
     detail: "standard",
     dispositions: [
-      { id: "a", disposition: "UI_ONLY", rationale: "ui" },
-      { id: "a", disposition: "UI_ONLY", rationale: "ui again" },
+      { id: "a", disposition: "REJECT", rationale: "ui" },
+      { id: "a", disposition: "REJECT", rationale: "ui again" },
     ],
   });
   assert.equal(duplicate.status, "error");
@@ -63,8 +63,8 @@ test("review apply fails closed on missing, duplicate, or extra disposition ids"
     packetIds: ["a"],
     detail: "standard",
     dispositions: [
-      { id: "a", disposition: "UI_ONLY", rationale: "ui" },
-      { id: "x", disposition: "UI_ONLY", rationale: "extra" },
+      { id: "a", disposition: "REJECT", rationale: "ui" },
+      { id: "x", disposition: "REJECT", rationale: "extra" },
     ],
   });
   assert.equal(extra.status, "error");

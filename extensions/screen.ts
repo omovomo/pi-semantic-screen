@@ -31,9 +31,6 @@ import {
   exactPresetStageInput,
 } from "../src/preset-screening-workflow.ts";
 
-const DEFAULT_PROVIDER_MODEL: readonly [string, string] = ["openrouter", "typesafe/jev-1.13"];
-const PROVIDER_ORDER = ["openrouter", "typesafe", "opencode", "vercel-ai-gateway", "cloudflare-workers-ai"];
-
 let runtimePromise: Promise<ModelRuntime> | undefined;
 const classificationCache = new ClassificationResultCache(50_000);
 
@@ -90,31 +87,10 @@ function parseEnvClassifier(): { provider: string; model: string } | undefined {
   const raw = process.env.PI_SEMANTIC_SCREEN_CLASSIFIER?.trim();
   if (!raw) return undefined;
   const slash = raw.indexOf("/");
-  if (slash <= 0 || slash === raw.length - 1) return undefined;
-  return { provider: raw.slice(0, slash), model: raw.slice(slash + 1) };
-}
-
-function rankModel(model: ClassifierModel<ClassifierApi>): [number, number, string, string] {
-  const preferredExact =
-    model.provider === DEFAULT_PROVIDER_MODEL[0] && model.id === DEFAULT_PROVIDER_MODEL[1] ? 0 : 1;
-  const providerRank = PROVIDER_ORDER.indexOf(model.provider);
-  return [preferredExact, providerRank === -1 ? PROVIDER_ORDER.length : providerRank, model.provider, model.id];
-}
-
-function compareRank(a: ClassifierModel<ClassifierApi>, b: ClassifierModel<ClassifierApi>): number {
-  const ar = rankModel(a);
-  const br = rankModel(b);
-  for (let index = 0; index < ar.length; index += 1) {
-    const av = ar[index];
-    const bv = br[index];
-    if (typeof av === "number" && typeof bv === "number") {
-      if (av !== bv) return av - bv;
-    } else {
-      const cmp = String(av).localeCompare(String(bv));
-      if (cmp !== 0) return cmp;
-    }
+  if (slash <= 0 || slash === raw.length - 1) {
+    throw new Error("PI_SEMANTIC_SCREEN_CLASSIFIER must use provider/model format");
   }
-  return 0;
+  return { provider: raw.slice(0, slash), model: raw.slice(slash + 1) };
 }
 
 function modelRef(model: ClassifierModel<ClassifierApi>): ClassifierModelRef {
@@ -143,13 +119,13 @@ async function resolveClassifierModel(
 
   if (request.provider) {
     if (available.length === 0) throw new Error(`no available classifier model for provider ${request.provider}`);
-    return available.sort(compareRank)[0];
+    return available[0];
   }
 
   if (request.model) {
-    const matches = available.filter((candidate) => candidate.id === request.model).sort(compareRank);
-    if (matches.length === 0) throw new Error(`classifier model id ${request.model} is not available/configured`);
-    return matches[0];
+    const match = available.find((candidate) => candidate.id === request.model);
+    if (!match) throw new Error(`classifier model id ${request.model} is not available/configured`);
+    return match;
   }
 
   const envPreference = parseEnvClassifier();
@@ -157,13 +133,16 @@ async function resolveClassifierModel(
     const envExact = available.find(
       (candidate) => candidate.provider === envPreference.provider && candidate.id === envPreference.model,
     );
-    if (envExact) return envExact;
+    if (!envExact) {
+      throw new Error(`classifier ${envPreference.provider}/${envPreference.model} from PI_SEMANTIC_SCREEN_CLASSIFIER is not available/configured`);
+    }
+    return envExact;
   }
 
   if (available.length === 0) {
     throw new Error("no usable classifier model is available; configure classifier auth/model in Pi");
   }
-  return available.sort(compareRank)[0];
+  return available[0];
 }
 
 function createBackend(signal?: AbortSignal): ClassifierBackend {
@@ -437,16 +416,7 @@ const evidenceParameters = Type.Object(
 
 const reviewDispositionSchema = Type.Object(
   {
-    id: Type.Union([
-      Type.Literal("CONFIRM"),
-      Type.Literal("EXPLICIT_FAILURE"),
-      Type.Literal("UI_ONLY"),
-      Type.Literal("OPTIONAL_ENRICHMENT"),
-      Type.Literal("CLEANUP_RETRY_TELEMETRY"),
-      Type.Literal("EXPECTED_NORMALIZATION"),
-      Type.Literal("NO_OUTWARD_EFFECT"),
-      Type.Literal("INSUFFICIENT_EVIDENCE"),
-    ]),
+    id: Type.String({ minLength: 1 }),
     terminal: Type.Boolean(),
     finding: Type.Boolean(),
     description: Type.String(),
@@ -507,16 +477,7 @@ const evidenceOutputSchema = Type.Object(
 const reviewDecisionInputSchema = Type.Object(
   {
     id: Type.String({ minLength: 1 }),
-    disposition: Type.Union([
-      Type.Literal("CONFIRM"),
-      Type.Literal("EXPLICIT_FAILURE"),
-      Type.Literal("UI_ONLY"),
-      Type.Literal("OPTIONAL_ENRICHMENT"),
-      Type.Literal("CLEANUP_RETRY_TELEMETRY"),
-      Type.Literal("EXPECTED_NORMALIZATION"),
-      Type.Literal("NO_OUTWARD_EFFECT"),
-      Type.Literal("INSUFFICIENT_EVIDENCE"),
-    ]),
+    disposition: Type.String({ minLength: 1 }),
     rationale: Type.String({ minLength: 1 }),
   },
   { additionalProperties: false },
@@ -524,34 +485,13 @@ const reviewDecisionInputSchema = Type.Object(
 
 const reviewDecisionTupleSchema = Type.Tuple([
   Type.String({ minLength: 1 }),
-  Type.Union([
-    Type.Literal("CONFIRM"),
-    Type.Literal("EXPLICIT_FAILURE"),
-    Type.Literal("UI_ONLY"),
-    Type.Literal("OPTIONAL_ENRICHMENT"),
-    Type.Literal("CLEANUP_RETRY_TELEMETRY"),
-    Type.Literal("EXPECTED_NORMALIZATION"),
-    Type.Literal("NO_OUTWARD_EFFECT"),
-    Type.Literal("INSUFFICIENT_EVIDENCE"),
-  ]),
+  Type.String({ minLength: 1 }),
   Type.String({ minLength: 1 }),
 ]);
 
 const reviewDecisionCommitSchema = Type.Union([reviewDecisionInputSchema, reviewDecisionTupleSchema]);
 
-const reviewDispositionCountsSchema = Type.Object(
-  {
-    CONFIRM: Type.Integer({ minimum: 0 }),
-    EXPLICIT_FAILURE: Type.Integer({ minimum: 0 }),
-    UI_ONLY: Type.Integer({ minimum: 0 }),
-    OPTIONAL_ENRICHMENT: Type.Integer({ minimum: 0 }),
-    CLEANUP_RETRY_TELEMETRY: Type.Integer({ minimum: 0 }),
-    EXPECTED_NORMALIZATION: Type.Integer({ minimum: 0 }),
-    NO_OUTWARD_EFFECT: Type.Integer({ minimum: 0 }),
-    INSUFFICIENT_EVIDENCE: Type.Integer({ minimum: 0 }),
-  },
-  { additionalProperties: false },
-);
+const reviewDispositionCountsSchema = Type.Object({}, { additionalProperties: Type.Integer({ minimum: 0 }) });
 
 const reviewApplyParameters = Type.Object(
   {
@@ -741,6 +681,7 @@ const efficiencySchema = Type.Object(
     withheld: Type.Integer({ minimum: 0 }),
     errors: Type.Integer({ minimum: 0 }),
     primaryReductionRate: Type.Number({ minimum: 0, maximum: 1 }),
+    reviewAvoided: Type.Integer({ minimum: 0 }),
     reviewAvoidanceRate: Type.Number({ minimum: 0, maximum: 1 }),
     primaryCacheHitRate: Type.Number({ minimum: 0, maximum: 1 }),
     classifierInputTokens: Type.Optional(Type.Number({ minimum: 0 })),
@@ -1061,6 +1002,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         scope: request.scope,
         reviewTargetIds: request.reviewTargetIds,
         targetItems: request.preset.evidence.targetItems,
+        reviewContract: buildReviewContract(request.preset),
       });
       if (started.status === "ok" && started.workflowId) {
         reviewPresetSnapshots.set(started.workflowId, structuredClone(request.preset));
@@ -1399,6 +1341,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         packetIds: request.packetIds,
         detail: request.detail,
         dispositions: request.dispositions,
+        contract: buildReviewContract(preset),
       });
       const structuredResult = { ...result, preset: preset.id };
       const text =
@@ -1437,6 +1380,7 @@ export default function semanticScreenExtension(pi: ExtensionAPI) {
         scope: request.scope,
         reviewTargetIds: request.reviewTargetIds,
         targetItems: preset.evidence.targetItems,
+        reviewContract: buildReviewContract(preset),
       });
       if (result.status === "ok" && result.workflowId) {
         reviewPresetSnapshots.set(result.workflowId, structuredClone(preset));

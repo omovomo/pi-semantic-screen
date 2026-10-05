@@ -28,10 +28,10 @@ The suite includes:
 - redaction, abort, concurrency and per-candidate classifier-result reuse/invalidation;
 - preflight approval guard;
 - evidence-provider deterministic discovery/evidence, API-version validation, bounded-source failures, and stale/syntax failures;
-- declarative preset loading and the adapterless JS/TS proof use case;
+- declarative preset loading, literal/regex compact discovery, single-file scope, and the shipped JS/TS proof use case;
 - classifier-first efficiency metrics and honest usage accounting;
 - evidence token bounding and review-contract overhead;
-- exact review disposition validation;
+- preset-owned generic/specialized review disposition validation;
 - extension-owned review workflow transitions;
 - idempotent pending packet retrieval;
 - stale packet commit rejection;
@@ -39,24 +39,21 @@ The suite includes:
 - expanded-insufficient -> blocked quarantine without global stop;
 - terminal findings/blocked/disposition accounting plus standard/expanded efficiency metrics;
 - generic semantic-stability comparison;
+- universality guards preventing use-case review labels, ecosystem directory policy, language-specific structural lookup, or classifier-vendor preference from leaking into generic core;
 - prompt/skill contract tests preventing model-owned preset-contract/retained-ID/review-state reconstruction;
 - package metadata and tool exposure.
 
 ## Full regression audit
 
-After unit checks, load the package in Pi and run:
+After unit checks, first run a representative compact declarative preset through `/screen-use`. Record `reviewAvoided` and `reviewAvoidanceRate`, and independently audit DROP safety on a bounded representative corpus. The classifier should remove a material amount of expensive review for the intended use case without unsafe DROP; there is no universal hard-coded percentage gate.
+
+Then run the built-in Python compatibility regression when Python is available:
 
 ```text
 /screen-exceptions my_project/
 ```
 
-Approve the classifier batch when requested, then use:
-
-```text
-/screen-continue
-```
-
-until terminal status.
+Approve the classifier batch when requested, then use `/screen-continue` until terminal status.
 
 For a full JSONL regression, verify:
 
@@ -82,7 +79,8 @@ Also verify:
 - no model-supplied preset question/criteria/threshold, retained IDs, or manual `reviewedIds`/blocked/expanded queue mutations in Code Mode;
 - no stale/empty-ID fetches;
 - primary counts/workflow ID come from `screen_primary_start` (or `screen_refinement_start`), and exact terminal review progress comes from `screen_review_commit`/`screen_review_next`;
-- representative explicit-failure, authoritative-record omission, fallback/default, UI-only, and ambiguous-dataflow cases receive evidence/dispositions consistent with the preset contract.
+- generic presets use only their emitted review vocabulary; specialized Python cases receive exception-specific labels only when the `python-exceptions` preset emits that vocabulary.
+- classifier effect is reported as both `reviewAvoided` and `reviewAvoidanceRate`; low effect is visible rather than hidden by extra classifier stages.
 
 ## Full development environment
 

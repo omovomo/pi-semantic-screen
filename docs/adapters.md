@@ -1,6 +1,6 @@
 # Evidence providers and adapters
 
-0.7 names the core boundary **EvidenceProvider**. The historical `ScreeningAdapter` types remain compatibility aliases, so existing advanced adapters do not need an immediate package split.
+The core boundary is **EvidenceProvider**. The historical `ScreeningAdapter` types remain compatibility aliases, so the feature-frozen Python provider does not need an immediate package split.
 
 ```ts
 interface EvidenceProvider {
@@ -40,25 +40,27 @@ Unknown/stale IDs fail closed.
 
 ## Generic-source provider
 
-`generic-source` is the adapter-light MVP. It is instantiated by a declarative preset and supports:
+`generic-source` is the universal text/source MVP. It is instantiated by a declarative preset and supports:
 
-- source include/exclude globs;
-- multiple trusted local regex discovery patterns;
+- source include/exclude globs and explicit directory skips;
+- single-file or directory scopes;
+- literal discovery through compact-preset `source.find`;
+- multiple deterministic regex discovery patterns through `source.match`;
 - deterministic source location and candidate IDs;
 - bounded candidate line windows;
 - bounded standard/expanded evidence windows;
 - hard file/file-size/candidate limits;
 - fail-closed errors when an included source exceeds the configured per-file bound.
 
-It deliberately does **not** claim AST, dataflow, caller/callee, symbol-read/write, or mutation semantics. Those facts require a provider that can establish them correctly.
+It deliberately does **not** claim AST, dataflow, caller/callee, symbol-read/write, or mutation semantics. Those facts require a provider or future structural-resolver capability that can establish them correctly. A generic concept such as `local_callers(depth=1)` must not be implemented by embedding one target language's lexer/parser inside `generic-source`.
 
-The shipped `presets/js-ts-silent-fallbacks.json` demonstrates catch-clause and Promise `.catch(...)` screening without a JS-specific core adapter.
+The shipped `presets/js-ts-silent-fallbacks.json` demonstrates that a language-specific use case can stay entirely in declarative policy/pattern data without making the generic provider language-aware.
 
 ## Advanced provider registration
 
 Builtin advanced providers are registered through `src/providers/registry.ts`. `registerEvidenceProvider()` validates API version, identity, and required capabilities at runtime; API version 1 defines the internal boundary needed for future external loading.
 
-0.7 does not automatically import arbitrary npm/local modules. External loading remains a packaging/trust concern, not a reason to couple provider-specific semantics back into the screening engine.
+0.8 does not automatically import arbitrary npm/local modules. External loading remains a packaging/trust concern, not a reason to couple provider-specific semantics back into the screening engine.
 
 ## Python reference provider freeze
 

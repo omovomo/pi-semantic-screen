@@ -2,7 +2,7 @@
 
 Classifier-first semantic screening for Pi: deterministic discovery feeds a cheap primary classifier, and expensive semantic reasoning runs only on retained candidates.
 
-Version **0.7.2** keeps the 0.7.1 canonical cache behavior and adds bounded optional `dropHints` to compact presets, so a use case can improve cheap negative filtering without expanding back into a full classifier contract. `python-exceptions` remains feature-frozen.
+Version **0.8.0** makes the default path genuinely universal. Compact presets use a neutral preset-owned review contract, `generic-source` remains language-agnostic text/source evidence, literal `source.find` is available for simple discovery, and classifier value is reported directly as `reviewAvoided` / `reviewAvoidanceRate`. `python-exceptions` remains a feature-frozen specialized reference provider rather than the semantic model for the core.
 
 ## Architecture at a glance
 
@@ -62,49 +62,45 @@ pi -e ./pi-semantic-screen
 GitHub tag:
 
 ```text
-pi install git:github.com/<owner>/pi-semantic-screen@v0.7.2
+pi install git:github.com/<owner>/pi-semantic-screen@v0.8.0
 ```
 
 See [Git installation and repository setup](docs/git-install.md).
 
 ## Quick start
 
-Built-in Python exception audit:
+The normal path is a compact declarative preset. A minimal language-neutral preset can use literal discovery:
+
+```json
+{
+  "id": "suspicious-config",
+  "source": {
+    "include": "**/*",
+    "find": ["ALLOW_ALL", "disable_validation"]
+  },
+  "question": "Can this candidate disable or bypass a required validation step?"
+}
+```
+
+Save it as `.pi-semantic-screen/presets/suspicious-config.json`, then run:
+
+```text
+/screen-use suspicious-config .
+```
+
+Use `source.match` when regex discovery is needed. `source.include` may be one glob or an array. The scope may be a directory or a single file. Add bounded `dropHints` only when the generic negative criterion is too conservative.
+
+The primary classifier is expected to remove a meaningful portion of the candidate universe from expensive semantic review while preserving fail-closed behavior. Results expose both the absolute count `reviewAvoided` and `reviewAvoidanceRate`; audit DROP safety before tuning for higher reduction.
+
+The specialized Python compatibility/reference path remains available:
 
 ```text
 /screen-exceptions my_project/
 ```
 
-Equivalent generic command:
+The shipped `js-ts-silent-fallbacks` preset is an example of language-specific policy expressed entirely as declarative data; it does not make the engine or `generic-source` JS/TS-specific.
 
-```text
-/screen-use python-exceptions my_project/
-```
-
-
-Declarative JS/TS proof use case (no JS-specific extension code):
-
-```text
-/screen-use js-ts-silent-fallbacks my_project/
-```
-
-Add project-local use cases as `.pi-semantic-screen/presets/<id>.json`; no package rebuild is needed when the existing provider capabilities are sufficient. Most `generic-source` audits need only `id`, `source.include`, `source.match`, and `question`. Add a few `dropHints` only when the generic NO criterion is too conservative; see [Presets](docs/presets.md).
-
-Optional explicit refinement:
-
-```text
-/screen-use python-exceptions my_project/ --refine
-```
-
-For guarded batches above the configured call limit, `/screen-use` stops at preflight for explicit approval. After approval `screen_primary_start` runs the exact preset-owned primary contract with `confirm:true`; the model never reconstructs classifier semantics or retained IDs. If primary screening is non-`ok`, review is not started.
-
-Continue an incomplete semantic review:
-
-```text
-/screen-continue
-```
-
-`/screen-continue` makes zero classifier calls and zero rediscovery passes. It resumes the latest extension-owned review workflow in the current Pi process.
+For guarded batches above the configured call limit, `/screen-use` stops at preflight for explicit approval. `screen_primary_start` then runs the exact preset-owned classifier contract and starts review from extension-owned retained IDs. `/screen-continue` resumes an incomplete review with zero classifier calls and zero rediscovery passes.
 
 ## Tool model
 
@@ -286,29 +282,22 @@ Terminal workflow results expose two accounting views:
 - `dispositionEventCounts` counts every committed standard/expanded review decision;
 - `finalDispositionCounts` counts each review target exactly once at its terminal outcome.
 
-Thus a target that is `INSUFFICIENT_EVIDENCE` at standard detail and remains unresolved at expanded detail contributes two disposition events but one final `INSUFFICIENT_EVIDENCE` outcome. The legacy `dispositionCounts` field remains in 0.7.x as a deprecated alias of `dispositionEventCounts`.
+Thus a target that is `INSUFFICIENT_EVIDENCE` at standard detail and remains unresolved at expanded detail contributes two disposition events but one final `INSUFFICIENT_EVIDENCE` outcome. The legacy `dispositionCounts` field remains as a deprecated alias of `dispositionEventCounts`.
 
 
 ## Review contract
 
-Every evidence packet includes a compact, self-contained review contract plus a fixed disposition vocabulary. The contract is included in the 7200-token transport budget rather than treated as free overhead.
+Every evidence packet includes the exact preset-owned review contract. The generic compact-preset contract is deliberately neutral:
 
+- `CONFIRM` — bounded evidence establishes a YES answer to the preset question;
+- `REJECT` — bounded evidence establishes a NO answer;
+- `INSUFFICIENT_EVIDENCE` — neither conclusion is established, so expanded evidence is requested or the candidate becomes blocked after expanded review.
 
-- `CONFIRM`
-- `EXPLICIT_FAILURE`
-- `UI_ONLY`
-- `OPTIONAL_ENRICHMENT`
-- `CLEANUP_RETRY_TELEMETRY`
-- `EXPECTED_NORMALIZATION`
-- `NO_OUTWARD_EFFECT`
-- `INSUFFICIENT_EVIDENCE`
+Advanced presets may define additional **terminal, non-finding** dispositions for their own semantic domain. `CONFIRM` remains the only finding disposition and `INSUFFICIENT_EVIDENCE` remains the only non-terminal disposition. Tool schemas and disposition accounting are dynamic; the generic core does not know names such as `UI_ONLY` or `EXPLICIT_FAILURE`.
 
-`NO_OUTWARD_EFFECT` requires affirmative evidence of locality; missing context is `INSUFFICIENT_EVIDENCE`.
+The contract is included in the evidence transport budget rather than treated as free overhead.
 
-For `python-exceptions`, normalization is intentionally narrow:
-
-- silently dropping a malformed authoritative lot/transaction/record from a normal returned core object is **not** expected normalization unless omission is explicitly allowed and surfaced;
-- failed read/parse of authoritative persisted domain state followed by returning an empty/default domain object as normal usable state is **CONFIRM**, not `EXPECTED_NORMALIZATION`, unless that defaulting is explicitly part of the outward contract and surfaced.
+For `python-exceptions`, the historical exception-specific dispositions and normalization rules remain inside that preset only. They are not defaults for other use cases.
 
 ## Built-in `python-exceptions` reference provider
 

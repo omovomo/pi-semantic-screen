@@ -54,18 +54,7 @@ A successful evidence packet may contain fewer IDs than the internal request bec
 
 ## Review contract
 
-Each packet carries the preset's explicit `reviewContract`. Treat it as authoritative rather than substituting generic intuition.
-
-- `CONFIRM`: hidden/changed failure semantics with a material core outward effect.
-- `EXPLICIT_FAILURE`: the failure is surfaced or fail-closed.
-- `UI_ONLY`: rendering/formatting/display-only effect without feedback into core data, persisted state, validation, business/control flow, or execution.
-- `OPTIONAL_ENRICHMENT`: best-effort enrichment whose absence cannot masquerade as a successful core result.
-- `CLEANUP_RETRY_TELEMETRY`: cleanup, retry/reconnect, logging, telemetry.
-- `EXPECTED_NORMALIZATION`: normalization explicitly allowed by the outward/source contract.
-- `NO_OUTWARD_EFFECT`: evidence affirmatively establishes no core outward effect; missing context is not enough.
-- `INSUFFICIENT_EVIDENCE`: evidence cannot establish confirmation or a terminal rejection.
-
-For the Python-exceptions preset, if emitted evidence proves that a malformed authoritative record is skipped from a normally returned authoritative collection, `CONFIRM` applies unless that specific omission is positively shown to be permitted or surfaced. Do not require proof that no unshown reporting mechanism exists. Returning an empty/default domain object after an authoritative persisted-state read/parse failure likewise confirms unless that defaulting is explicitly permitted and surfaced.
+Each evidence packet carries the exact preset-owned `reviewContract`. Treat it as authoritative. Do not assume a fixed disposition vocabulary beyond the engine invariants: `CONFIRM` is a terminal finding and `INSUFFICIENT_EVIDENCE` requests expanded evidence (or becomes blocked after expanded evidence). Compact presets use the neutral `CONFIRM` / `REJECT` / `INSUFFICIENT_EVIDENCE` contract. Advanced presets may define additional terminal dispositions for their own semantic domain. Never import a disposition from another preset or infer domain semantics from the extension.
 
 ## Low-level compatibility tools
 

@@ -27,14 +27,17 @@ npm run test:codemode
 
 ## Adding a use case
 
-Do not start by creating another large prompt.
+Start with the smallest generic path.
 
-1. If an existing adapter can discover candidates and produce suitable evidence, add only a preset under `src/presets/` and register it in `src/presets/registry.ts`.
-2. If deterministic extraction is genuinely new, add a small adapter implementing `ScreeningAdapter` under `src/adapters/`, then add a preset that references it.
-3. Add a short alias prompt only when a memorable command is useful. The alias should delegate to `/screen-use`, not duplicate the workflow.
-4. Add tests for discovery determinism, evidence packet IDs/caps, fail-closed behavior, and the preset registry.
+1. Create a compact declarative preset, normally project-local under `.pi-semantic-screen/presets/<id>.json`. Prefer `source.find` for literal discovery and `source.match` only when regex is needed.
+2. Keep the semantic question and optional bounded `dropHints` in the preset. Do not move business meaning into discovery code.
+3. Use an existing evidence provider if bounded text/source facts are sufficient.
+4. Use an advanced preset when you need explicit evidence limits, a specialized existing provider, refinement, or a richer preset-owned review vocabulary.
+5. Add a new provider only when a genuinely new deterministic fact cannot be represented safely by the existing provider boundary. Do not add a target-language parser, call graph, or dataflow subsystem to `generic-source`.
+6. If a structural concept is language-neutral but its implementation is language-specific, define a narrow capability/resolver boundary first; unsupported languages must fail closed.
+7. Validate classifier value on a representative corpus: report `reviewAvoided` and `reviewAvoidanceRate`, audit DROP safety, and do not increase reduction at the expense of recall/fail-closed behavior.
 
-See `docs/adapters.md` and `docs/presets.md`.
+A new use case should normally require preset data, not TypeScript changes to the extension. See `docs/presets.md`, `docs/adapters.md`, and `docs/universality.md`.
 
 ## Pull requests
 

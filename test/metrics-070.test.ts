@@ -28,6 +28,8 @@ test("0.7 efficiency metrics distinguish evaluated work from cache reuse", () =>
   assert.equal(metrics.primaryEvaluated, 25);
   assert.equal(metrics.primaryCacheHits, 75);
   assert.equal(metrics.primaryReductionRate, 0.6);
+  assert.equal(metrics.reviewAvoided, 60);
+  assert.equal(metrics.reviewAvoided, 60);
   assert.equal(metrics.reviewAvoidanceRate, 0.6);
   assert.equal(metrics.primaryCacheHitRate, 0.75);
   assert.equal(metrics.classifierTotalTokens, 1_200);
@@ -49,6 +51,8 @@ test("0.7 efficiency metrics do not invent token or monetary precision", () => {
   });
 
   assert.equal(metrics.primaryReductionRate, 0.5);
+  assert.equal(metrics.reviewAvoided, 2);
+  assert.equal(metrics.reviewAvoided, 2);
   assert.equal(metrics.reviewAvoidanceRate, 0.5);
   assert.equal(metrics.classifierInputTokens, undefined);
   assert.equal(metrics.classifierOutputTokens, undefined);

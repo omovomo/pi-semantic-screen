@@ -40,7 +40,7 @@ test("review workflow commit atomically queues expanded evidence and prioritizes
     dispositions: [
       { id: "a", disposition: "CONFIRM", rationale: "hidden default" },
       { id: "b", disposition: "INSUFFICIENT_EVIDENCE", rationale: "needs downstream" },
-      { id: "c", disposition: "UI_ONLY", rationale: "display only" },
+      { id: "c", disposition: "REJECT", rationale: "display only" },
     ],
   });
   assert.equal(committed.status, "ready");
@@ -86,7 +86,7 @@ test("stale packet commits fail closed and preserve pending state", async () => 
   const stale = manager.commit({
     workflowId: start.workflowId,
     packetId: "wrong",
-    dispositions: [{ id: "a", disposition: "UI_ONLY", rationale: "ui" }],
+    dispositions: [{ id: "a", disposition: "REJECT", rationale: "ui" }],
   });
   assert.equal(stale.status, "error");
   const repeated = await manager.next(start.workflowId, build);
@@ -156,7 +156,7 @@ test("terminal next does not build or fetch empty evidence", async () => {
   const committed = manager.commit({
     workflowId: start.workflowId,
     packetId: first.packetId!,
-    dispositions: [{ id: "a", disposition: "UI_ONLY", rationale: "display only" }],
+    dispositions: [{ id: "a", disposition: "REJECT", rationale: "display only" }],
   });
   assert.equal(committed.status, "complete");
   const terminal = await manager.next(start.workflowId, build);
@@ -175,18 +175,18 @@ test("review workflow commit accepts compact tuple dispositions and normalizes t
     packetId: first.packetId!,
     dispositions: [
       ["a", "CONFIRM", "hidden core fallback"],
-      ["b", "UI_ONLY", "display only"],
+      ["b", "REJECT", "display only"],
     ],
   });
   assert.equal(committed.status, "complete");
   assert.equal(committed.progress?.semanticallyReviewed, 2);
   assert.deepEqual(committed.findings, [{ id: "a", rationale: "hidden core fallback" }]);
   assert.equal(committed.dispositionCounts?.CONFIRM, 1);
-  assert.equal(committed.dispositionCounts?.UI_ONLY, 1);
+  assert.equal(committed.dispositionCounts?.REJECT, 1);
   assert.equal(committed.dispositionEventCounts?.CONFIRM, 1);
-  assert.equal(committed.dispositionEventCounts?.UI_ONLY, 1);
+  assert.equal(committed.dispositionEventCounts?.REJECT, 1);
   assert.equal(committed.finalDispositionCounts?.CONFIRM, 1);
-  assert.equal(committed.finalDispositionCounts?.UI_ONLY, 1);
+  assert.equal(committed.finalDispositionCounts?.REJECT, 1);
 });
 
 
@@ -204,12 +204,12 @@ test("final disposition counts record the resolved expanded outcome once per can
   const final = manager.commit({
     workflowId: start.workflowId,
     packetId: expanded.packetId!,
-    dispositions: [{ id: "a", disposition: "EXPLICIT_FAILURE", rationale: "expanded evidence shows explicit failure" }],
+    dispositions: [{ id: "a", disposition: "REJECT", rationale: "expanded evidence shows explicit failure" }],
   });
   assert.equal(final.status, "complete");
   assert.equal(final.dispositionEventCounts?.INSUFFICIENT_EVIDENCE, 1);
-  assert.equal(final.dispositionEventCounts?.EXPLICIT_FAILURE, 1);
+  assert.equal(final.dispositionEventCounts?.REJECT, 1);
   assert.equal(final.finalDispositionCounts?.INSUFFICIENT_EVIDENCE, 0);
-  assert.equal(final.finalDispositionCounts?.EXPLICIT_FAILURE, 1);
+  assert.equal(final.finalDispositionCounts?.REJECT, 1);
   assert.equal(final.dispositionCounts?.INSUFFICIENT_EVIDENCE, 1);
 });
