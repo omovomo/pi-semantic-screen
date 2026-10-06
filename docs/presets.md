@@ -69,15 +69,15 @@ When the generic NO criterion is too conservative, the compact form may add a fe
 }
 ```
 
-The simple form uses deterministic engine-owned defaults (currently defaults version 2):
+The simple form uses deterministic engine-owned defaults (currently defaults version 4):
 
-- primary threshold `0.70`;
-- generic YES/NO classifier criteria around the supplied question;
+- primary `keepThreshold=0.70` and fail-closed `dropThreshold=0.20`; legacy `classifier.threshold` remains supported and keeps the old symmetric `1 - threshold` DROP boundary unless `classifier.dropThreshold` is explicit;
+- generic YES/NO classifier criteria around the supplied question, with an explicit epistemic guard: missing, unresolved, or ambiguous facts that could change the answer cannot establish NO/DROP;
 - neutral review vocabulary `CONFIRM / REJECT / INSUFFICIENT_EVIDENCE`, with the exact semantic question embedded in the review instructions;
 - generic-source windows: candidate `1 before / 5 after / 3500 chars`, standard `5 / 16 / 12000`, expanded `16 / 48 / 28000`, plus bounded file/candidate limits;
 - packet budget `targetItems=40`, `maxItems=60`, `maxSources=10`, `maxChars=120000`, `maxTokens=7200`.
 
-Because normalization produces a full deterministic contract, the semantic cache fingerprints the normalized question/criteria/threshold rather than relying on hidden model-generated policy.
+Because normalization produces a full deterministic contract, the semantic cache fingerprints the normalized question/criteria plus the resolved keep/drop threshold pair rather than relying on hidden model-generated policy.
 
 Optional simple overrides are narrow and explicit:
 
@@ -87,7 +87,8 @@ Optional simple overrides are narrow and explicit:
   "source": { "include": ["**/*.ts"], "match": ["catch"] },
   "question": "Could this path hide a required failure?",
   "classifier": {
-    "threshold": 0.80,
+    "keepThreshold": 0.80,
+    "dropThreshold": 0.15,
     "keepWhen": "Evidence plausibly hides the required failure.",
     "dropWhen": "Evidence clearly surfaces the failure."
   },

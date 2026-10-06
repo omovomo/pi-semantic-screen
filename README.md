@@ -90,7 +90,7 @@ Save it as `.pi-semantic-screen/presets/suspicious-config.json`, then run:
 
 Use `source.match` when regex discovery is needed. `source.include` may be one glob or an array. The scope may be a directory or a single file. Add bounded `dropHints` only when the generic negative criterion is too conservative.
 
-The primary classifier is expected to remove a meaningful portion of the candidate universe from expensive semantic review while preserving fail-closed behavior. Results expose both the absolute count `reviewAvoided` and `reviewAvoidanceRate`; audit DROP safety before tuning for higher reduction.
+The primary classifier is expected to remove a meaningful portion of the candidate universe from expensive semantic review while preserving fail-closed behavior. Compact presets keep the negative class epistemically strict: missing, unresolved, or ambiguous facts that could change the answer cannot establish NO/DROP. Results expose both the absolute count `reviewAvoided` and `reviewAvoidanceRate`; audit DROP safety before tuning for higher reduction.
 
 The specialized Python compatibility/reference path remains available:
 
@@ -164,13 +164,15 @@ Continues a deferred primary run using the exact preset refinement contract and 
 
 ### `screen_batch`
 
-Generic boolean classifier primitive for ad-hoc/low-level workflows. For probability `p` and threshold `t`:
+Generic boolean classifier primitive for ad-hoc/low-level workflows. The legacy single `threshold=t` form remains symmetric:
 
 ```text
 p >= t       => kept
 p <= 1 - t   => dropped
 otherwise    => undecided
 ```
+
+For fail-closed screening, callers may instead supply separate `keepThreshold` and `dropThreshold`. Compact presets normalize to `keepThreshold=0.70` and `dropThreshold=0.20` by default, so borderline low probabilities remain `undecided` rather than being auto-dropped.
 
 Every input ID ends in exactly one bucket:
 

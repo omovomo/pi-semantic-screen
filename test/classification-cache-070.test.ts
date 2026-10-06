@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { ClassificationResultCache, runWithClassificationCache } from "../src/cache.ts";
+import { ClassificationResultCache, fingerprintClassifierContract, runWithClassificationCache } from "../src/cache.ts";
 import type { ScreeningInput, ScreeningResult } from "../src/engine.ts";
 
 function resultFor(input: ScreeningInput): ScreeningResult {
@@ -61,4 +61,18 @@ test("0.7 classification cache invalidates on classifier identity or semantic co
   assert.equal(newModel.cacheHits, 0);
   assert.equal(newQuestion.cacheHits, 0);
   assert.equal(evaluated, 6);
+});
+
+
+test("0.8 classification cache contract includes explicit DROP threshold", async () => {
+  const identity = { provider: "fake", id: "classifier", implementation: "v1" };
+  const base = {
+    items: [{ id: "x", text: "candidate" }],
+    question: "keep?",
+    keepThreshold: 0.7,
+    dropThreshold: 0.2,
+  };
+  const a = await fingerprintClassifierContract(base, identity);
+  const b = await fingerprintClassifierContract({ ...base, dropThreshold: 0.1 }, identity);
+  assert.notEqual(a, b);
 });

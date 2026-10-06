@@ -1,7 +1,16 @@
 # Changelog
 
+## 0.8.0 release-candidate update (asymmetric fail-closed thresholds)
+
+- compact presets now normalize to separate `keepThreshold=0.70` and `dropThreshold=0.20`;
+- legacy single `threshold` remains supported and preserves symmetric `1 - threshold` DROP behavior unless an explicit `dropThreshold` is supplied;
+- classifier/cache fingerprints include the resolved keep/drop threshold pair;
+- primary manifest exposes both thresholds while retaining `threshold` as a compatibility alias for the keep threshold;
+- no provider, evidence, corpus, or Python reference-adapter semantics changed.
+
 ## 0.8.0 - 2026-10-05
 
+- Tighten compact primary classifier defaults (defaults version 3) so a NO/DROP requires positive bounded evidence: missing, unresolved, or ambiguous facts that could change the answer keep the negative criterion unestablished instead of being treated as evidence for NO. Apply the epistemic guard even when compact `classifier.dropWhen` is overridden; advanced/full presets remain the explicit escape hatch.
 - Make review dispositions preset-owned instead of hard-coding silent-fallback/exception outcomes in the generic core. Compact presets now use neutral `CONFIRM`, `REJECT`, and `INSUFFICIENT_EVIDENCE`; specialized presets may add their own terminal non-finding dispositions.
 - Make review tool schemas and disposition accounting dynamic so new semantic domains do not require extension code changes.
 - Keep the existing exception-specific vocabulary only inside the feature-frozen `python-exceptions` preset.

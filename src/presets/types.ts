@@ -4,7 +4,10 @@ import type { EvidenceProviderSpec } from "../providers/spec.ts";
 export interface ScreeningStagePreset {
   question: string;
   criteria: ScreeningCriteria;
+  /** Keep threshold. Retains the legacy field name for compatibility. */
   threshold: number;
+  /** Optional explicit DROP threshold. Omitted means legacy symmetric 1 - threshold. */
+  dropThreshold?: number;
 }
 
 export interface ReviewDispositionPreset {

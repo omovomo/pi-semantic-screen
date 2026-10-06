@@ -1,6 +1,6 @@
 import {
   DEFAULT_CRITERIA,
-  DEFAULT_THRESHOLD,
+  resolveScreeningThresholds,
   type ScreeningInput,
   type ScreeningResult,
 } from "./engine.ts";
@@ -11,11 +11,13 @@ export interface CachedScreeningResult {
 }
 
 export async function fingerprintScreeningInput(input: ScreeningInput): Promise<string> {
+  const thresholds = resolveScreeningThresholds(input);
   const payload = JSON.stringify({
     items: input.items.map((item) => [item.id, item.text]),
     question: input.question,
     criteria: input.criteria ?? DEFAULT_CRITERIA,
-    threshold: input.threshold ?? DEFAULT_THRESHOLD,
+    keepThreshold: thresholds.keepThreshold,
+    dropThreshold: thresholds.dropThreshold,
     provider: input.provider ?? null,
     model: input.model ?? null,
     confirm: input.confirm ?? false,
@@ -106,11 +108,13 @@ export async function fingerprintClassifierContract(
   input: ScreeningInput,
   identity: ClassifierIdentity,
 ): Promise<string> {
+  const thresholds = resolveScreeningThresholds(input);
   return sha256(JSON.stringify({
     schema: CLASSIFICATION_CACHE_SCHEMA,
     question: input.question,
     criteria: input.criteria ?? DEFAULT_CRITERIA,
-    threshold: input.threshold ?? DEFAULT_THRESHOLD,
+    keepThreshold: thresholds.keepThreshold,
+    dropThreshold: thresholds.dropThreshold,
     classifier: {
       provider: identity.provider,
       id: identity.id,

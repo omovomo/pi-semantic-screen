@@ -38,3 +38,11 @@ test("0.8 classifier selection has no built-in vendor or model preference", () =
   assert.match(source, /PI_SEMANTIC_SCREEN_CLASSIFIER must use provider\/model format/);
   assert.match(source, /from PI_SEMANTIC_SCREEN_CLASSIFIER is not available\/configured/);
 });
+
+
+test("0.8 compact primary contract keeps unresolved facts out of the DROP criterion", () => {
+  const source = text("../src/presets/declarative.ts");
+  assert.match(source, /Missing, unresolved, or ambiguous facts that could change the answer are not evidence for NO/);
+  assert.match(source, /Do not assume the origin, value, caller, callee behavior, dataflow, configuration, or external state/);
+  assert.match(source, /the negative criterion is not established and the candidate must remain uncertain/);
+});

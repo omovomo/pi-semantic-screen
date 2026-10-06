@@ -61,7 +61,7 @@ It does not know language-specific exception semantics, application class names,
 A preset owns semantic meaning:
 
 - candidate/source provider selection;
-- primary classifier question, criteria, threshold;
+- primary classifier question, criteria, keep threshold, and DROP threshold;
 - optional refinement contract;
 - semantic review contract;
 - evidence budgets.

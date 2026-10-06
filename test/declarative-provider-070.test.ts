@@ -112,13 +112,19 @@ test("0.7.1 compact preset normalizes deterministic classifier, review, and budg
     question: "Can a required operation failure become apparently valid default behavior?",
   }, "compact-test");
 
-  assert.equal(SIMPLE_PRESET_DEFAULTS_VERSION, 2);
+  assert.equal(SIMPLE_PRESET_DEFAULTS_VERSION, 4);
   assert.equal(preset.id, "compact-audit");
   assert.equal(preset.label, "compact-audit");
   assert.equal(preset.adapter, "generic-source");
   assert.equal(preset.provider?.kind, "generic-source");
   assert.equal(preset.primary.threshold, 0.7);
+  assert.equal(preset.primary.dropThreshold, 0.2);
   assert.match(preset.primary.criteria.true, /answering the semantic question YES/);
+  assert.match(preset.primary.criteria.true, /do not infer hidden or unresolved facts/);
+  assert.match(preset.primary.criteria.false, /positively establishes a NO answer/);
+  assert.match(preset.primary.criteria.false, /Missing, unresolved, or ambiguous facts that could change the answer are not evidence for NO/);
+  assert.match(preset.primary.criteria.false, /Do not assume the origin, value, caller, callee behavior, dataflow, configuration, or external state/);
+  assert.match(preset.primary.criteria.false, /negative criterion is not established and the candidate must remain uncertain/);
   assert.match(preset.review.instructions, /Can a required operation failure/);
   assert.deepEqual(preset.evidence, {
     targetItems: 40,
@@ -156,7 +162,11 @@ test("0.7.1 compact preset supports explicit overrides without requiring advance
   }, "compact-overrides-test");
 
   assert.equal(preset.primary.threshold, 0.8);
-  assert.equal(preset.primary.criteria.true, "Evidence plausibly hides the required failure.");
+  assert.ok(Math.abs((preset.primary.dropThreshold ?? -1) - 0.2) < 1e-12);
+  assert.match(preset.primary.criteria.true, /^Evidence plausibly hides the required failure\./);
+  assert.match(preset.primary.criteria.true, /do not infer hidden or unresolved facts/);
+  assert.match(preset.primary.criteria.false, /^Evidence clearly surfaces the failure\./);
+  assert.match(preset.primary.criteria.false, /Missing, unresolved, or ambiguous facts that could change the answer are not evidence for NO/);
   assert.equal(preset.evidence.maxTokens, 4000);
   assert.equal(preset.evidence.maxItems, 60);
 });
@@ -310,4 +320,26 @@ test("0.8 generic-source has no ecosystem skip policy; projects opt in with skip
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+
+test("0.8 compact preset supports explicit asymmetric keep/drop thresholds", () => {
+  const preset = parseDeclarativePreset({
+    id: "asymmetric",
+    source: { include: "**/*", find: ["SCREEN"] },
+    question: "Is the semantic condition established?",
+    classifier: { keepThreshold: 0.75, dropThreshold: 0.15 },
+  }, "asymmetric-test");
+
+  assert.equal(preset.primary.threshold, 0.75);
+  assert.equal(preset.primary.dropThreshold, 0.15);
+});
+
+test("0.8 compact preset rejects conflicting legacy and keep thresholds", () => {
+  assert.throws(() => parseDeclarativePreset({
+    id: "conflicting-thresholds",
+    source: { include: "**/*", find: ["SCREEN"] },
+    question: "Is the semantic condition established?",
+    classifier: { threshold: 0.7, keepThreshold: 0.8 },
+  }, "conflicting-thresholds-test"), /must match/);
 });

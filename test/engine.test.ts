@@ -491,3 +491,44 @@ test("marks classifier usage incomplete when any call omits usage", async () => 
   assert.equal(result.classifierAccounting?.complete, false);
   assert.equal(result.classifierAccounting?.usage?.totalTokens, 11);
 });
+
+
+test("asymmetric thresholds retain borderline low probabilities instead of unsafe DROP", async () => {
+  const result = await classifyBatch(
+    {
+      items: [
+        { id: "safe-low", text: "a" },
+        { id: "borderline", text: "b" },
+        { id: "high", text: "c" },
+      ],
+      question: "keep?",
+      keepThreshold: 0.7,
+      dropThreshold: 0.2,
+    },
+    backendFromProbabilities({ "safe-low": 0.19, borderline: 0.27, high: 0.8 }),
+    baseOptions,
+  );
+  assert.deepEqual(result.dropped.map((x) => x.id), ["safe-low"]);
+  assert.deepEqual(result.undecided.map((x) => x.id), ["borderline"]);
+  assert.deepEqual(result.kept.map((x) => x.id), ["high"]);
+});
+
+test("legacy threshold keeps symmetric DROP behavior", async () => {
+  const result = await classifyBatch(
+    { items: [{ id: "x", text: "a" }], question: "keep?", threshold: 0.7 },
+    backendFromProbabilities({ x: 0.29 }),
+    baseOptions,
+  );
+  assert.equal(result.dropped[0]?.id, "x");
+});
+
+test("conflicting threshold and keepThreshold fail closed", async () => {
+  await assert.rejects(
+    classifyBatch(
+      { items: [{ id: "x", text: "a" }], question: "keep?", threshold: 0.7, keepThreshold: 0.8 },
+      backendFromProbabilities({ x: 0.9 }),
+      baseOptions,
+    ),
+    /threshold and keepThreshold must match/,
+  );
+});

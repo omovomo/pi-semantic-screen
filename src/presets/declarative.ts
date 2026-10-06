@@ -4,9 +4,10 @@ import type { GenericSourcePattern, GenericSourceProviderConfig } from "../provi
 import type { EvidenceProviderSpec } from "../providers/spec.ts";
 import type { ScreeningPreset, ScreeningStagePreset } from "./types.ts";
 
-export const SIMPLE_PRESET_DEFAULTS_VERSION = 2;
+export const SIMPLE_PRESET_DEFAULTS_VERSION = 4;
 
-const SIMPLE_PRIMARY_THRESHOLD = 0.70;
+const SIMPLE_PRIMARY_KEEP_THRESHOLD = 0.70;
+const SIMPLE_PRIMARY_DROP_THRESHOLD = 0.20;
 const SIMPLE_EVIDENCE_DEFAULTS = {
   targetItems: 40,
   maxItems: 60,
@@ -51,13 +52,26 @@ function integer(value: unknown, where: string, min: number, max: number): numbe
 function stage(value: unknown, where: string): ScreeningStagePreset {
   const input = object(value, where);
   const criteria = object(input.criteria, `${where}.criteria`);
+  const legacyThreshold = input.threshold === undefined ? undefined : number(input.threshold, `${where}.threshold`, 0.5, 1);
+  const keepThreshold = input.keepThreshold === undefined ? legacyThreshold : number(input.keepThreshold, `${where}.keepThreshold`, 0.5, 1);
+  if (keepThreshold === undefined) throw new Error(`${where}.threshold or ${where}.keepThreshold is required`);
+  if (legacyThreshold !== undefined && input.keepThreshold !== undefined && legacyThreshold !== keepThreshold) {
+    throw new Error(`${where}.threshold and ${where}.keepThreshold must match when both are provided`);
+  }
+  const dropThreshold = input.dropThreshold === undefined
+    ? undefined
+    : number(input.dropThreshold, `${where}.dropThreshold`, 0, 0.499999999999);
+  if (dropThreshold !== undefined && dropThreshold >= keepThreshold) {
+    throw new Error(`${where}.dropThreshold must be less than keepThreshold`);
+  }
   return {
     question: string(input.question, `${where}.question`),
     criteria: {
       true: string(criteria.true, `${where}.criteria.true`),
       false: string(criteria.false, `${where}.criteria.false`),
     },
-    threshold: number(input.threshold, `${where}.threshold`, 0.5, 1),
+    threshold: keepThreshold,
+    ...(dropThreshold === undefined ? {} : { dropThreshold }),
   };
 }
 
@@ -242,16 +256,31 @@ function parseSimplePreset(input: Record<string, unknown>, source: string): Scre
   const review = input.review === undefined ? {} : object(input.review, `${source}.review`);
   const config = simpleSource(input.source, `${source}.source`);
   const dropHints = simpleDropHints(input.dropHints, `${source}.dropHints`);
-  const threshold = classifier.threshold === undefined
-    ? SIMPLE_PRIMARY_THRESHOLD
+  const legacyThreshold = classifier.threshold === undefined
+    ? undefined
     : number(classifier.threshold, `${source}.classifier.threshold`, 0.5, 1);
-  const keepWhen = optionalString(classifier.keepWhen, `${source}.classifier.keepWhen`) ??
+  const keepThreshold = classifier.keepThreshold === undefined
+    ? (legacyThreshold ?? SIMPLE_PRIMARY_KEEP_THRESHOLD)
+    : number(classifier.keepThreshold, `${source}.classifier.keepThreshold`, 0.5, 1);
+  if (legacyThreshold !== undefined && classifier.keepThreshold !== undefined && legacyThreshold !== keepThreshold) {
+    throw new Error(`${source}.classifier.threshold and ${source}.classifier.keepThreshold must match when both are provided`);
+  }
+  const dropThreshold = classifier.dropThreshold === undefined
+    ? (legacyThreshold !== undefined ? 1 - legacyThreshold : SIMPLE_PRIMARY_DROP_THRESHOLD)
+    : number(classifier.dropThreshold, `${source}.classifier.dropThreshold`, 0, 0.499999999999);
+  if (dropThreshold >= keepThreshold) {
+    throw new Error(`${source}.classifier.dropThreshold must be less than classifier.keepThreshold`);
+  }
+  const keepWhenBase = optionalString(classifier.keepWhen, `${source}.classifier.keepWhen`) ??
     "The bounded candidate evidence provides concrete support for answering the semantic question YES.";
-  const defaultDropWhen = "The bounded candidate evidence clearly supports answering the semantic question NO.";
+  const keepWhen = `${keepWhenBase} Judge YES only from facts established by the bounded candidate evidence; do not infer hidden or unresolved facts.`;
+  const dropWhenBase = optionalString(classifier.dropWhen, `${source}.classifier.dropWhen`) ??
+    "The bounded candidate evidence clearly and positively establishes a NO answer to the semantic question.";
   const hintClause = dropHints.length === 0
     ? ""
     : ` Evidence patterns that may support NO when explicitly present and semantically relevant: ${dropHints.map((hint, index) => `${index + 1}) ${hint}`).join("; ")}. Hints are not rules: a hint match alone is not sufficient for DROP, and ambiguity remains UNDECIDED.`;
-  const dropWhen = optionalString(classifier.dropWhen, `${source}.classifier.dropWhen`) ?? `${defaultDropWhen}${hintClause}`;
+  const epistemicDropGuard = " Missing, unresolved, or ambiguous facts that could change the answer are not evidence for NO. Do not assume the origin, value, caller, callee behavior, dataflow, configuration, or external state of anything not established by the bounded candidate evidence. If NO depends on such an unresolved fact, the negative criterion is not established and the candidate must remain uncertain.";
+  const dropWhen = `${dropWhenBase}${hintClause}${epistemicDropGuard}`;
   const defaultInstructions = `Semantic question: ${question}\nJudge only the bounded emitted evidence. Do not infer hidden facts, callers, or dataflow that are not shown. Missing or ambiguous context is INSUFFICIENT_EVIDENCE.`;
   const defaultConfirm = `CONFIRM only when the bounded evidence establishes a YES answer to this semantic question: ${question}`;
   const defaultReject = "Use a terminal non-finding disposition only when the bounded evidence establishes that the semantic question is not satisfied. Use INSUFFICIENT_EVIDENCE when neither conclusion is established.";
@@ -265,7 +294,8 @@ function parseSimplePreset(input: Record<string, unknown>, source: string): Scre
     primary: {
       question,
       criteria: { true: keepWhen, false: dropWhen },
-      threshold,
+      threshold: keepThreshold,
+      dropThreshold,
     },
     review: {
       instructions: optionalString(review.instructions, `${source}.review.instructions`) ?? defaultInstructions,

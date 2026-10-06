@@ -12,7 +12,12 @@ export interface ScreeningInput {
   items: ScreeningItem[];
   question: string;
   criteria?: ScreeningCriteria;
+  /** Legacy symmetric keep threshold. When dropThreshold is omitted, DROP uses 1 - threshold. */
   threshold?: number;
+  /** Explicit keep threshold. Must agree with threshold when both are supplied. */
+  keepThreshold?: number;
+  /** Explicit fail-closed DROP threshold. */
+  dropThreshold?: number;
   provider?: string;
   model?: string;
   confirm?: boolean;
@@ -158,6 +163,31 @@ export const DEFAULT_CRITERIA: ScreeningCriteria = {
 };
 
 export const DEFAULT_THRESHOLD = 0.7;
+export const DEFAULT_DROP_THRESHOLD = 1 - DEFAULT_THRESHOLD;
+
+export interface ResolvedScreeningThresholds {
+  keepThreshold: number;
+  dropThreshold: number;
+}
+
+export function resolveScreeningThresholds(input: Pick<ScreeningInput, "threshold" | "keepThreshold" | "dropThreshold">): ResolvedScreeningThresholds {
+  if (input.threshold !== undefined && input.keepThreshold !== undefined && input.threshold !== input.keepThreshold) {
+    throw new Error("threshold and keepThreshold must match when both are provided");
+  }
+  const keepThreshold = input.keepThreshold ?? input.threshold ?? DEFAULT_THRESHOLD;
+  const dropThreshold = input.dropThreshold ?? (input.threshold !== undefined ? 1 - input.threshold : DEFAULT_DROP_THRESHOLD);
+  if (!Number.isFinite(keepThreshold) || keepThreshold <= 0.5 || keepThreshold > 1) {
+    throw new Error("keepThreshold must be > 0.5 and <= 1");
+  }
+  if (!Number.isFinite(dropThreshold) || dropThreshold < 0 || dropThreshold >= 0.5) {
+    throw new Error("dropThreshold must be >= 0 and < 0.5");
+  }
+  if (dropThreshold >= keepThreshold) {
+    throw new Error("dropThreshold must be less than keepThreshold");
+  }
+  return { keepThreshold, dropThreshold };
+}
+
 const DEFAULT_CALL_LIMIT = 200;
 const DEFAULT_CONCURRENCY = 12;
 const DEFAULT_CONTEXT_SAFETY_FRACTION = 0.85;
@@ -184,10 +214,7 @@ function validateInput(input: ScreeningInput): void {
     seen.add(item.id);
   }
 
-  const threshold = input.threshold ?? DEFAULT_THRESHOLD;
-  if (!Number.isFinite(threshold) || threshold <= 0.5 || threshold > 1) {
-    throw new Error("threshold must be > 0.5 and <= 1");
-  }
+  resolveScreeningThresholds(input);
 
   if (input.criteria) {
     if (typeof input.criteria.true !== "string" || input.criteria.true.trim().length === 0) {
@@ -365,7 +392,7 @@ export async function classifyBatch(
   }
 
   const inputIds = input.items.map((item) => item.id);
-  const threshold = input.threshold ?? DEFAULT_THRESHOLD;
+  const { keepThreshold, dropThreshold } = resolveScreeningThresholds(input);
   const criteria = input.criteria ?? DEFAULT_CRITERIA;
 
   if (input.items.length > callLimit && input.confirm !== true) {
@@ -535,9 +562,9 @@ export async function classifyBatch(
           continue;
         }
 
-        if (answer.probability >= threshold) {
+        if (answer.probability >= keepThreshold) {
           terminal.set(item.id, { bucket: "kept", probability: answer.probability });
-        } else if (answer.probability <= 1 - threshold) {
+        } else if (answer.probability <= dropThreshold) {
           terminal.set(item.id, { bucket: "dropped", probability: answer.probability });
         } else {
           terminal.set(item.id, { bucket: "undecided", probability: answer.probability });

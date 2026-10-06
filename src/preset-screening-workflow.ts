@@ -1,5 +1,5 @@
 import type { AdapterCandidate, AdapterDiscoverResult } from "./adapters/types.ts";
-import { DEFAULT_THRESHOLD, type ClassifierUsageLike, type ScreeningInput, type ScreeningResult } from "./engine.ts";
+import { DEFAULT_THRESHOLD, resolveScreeningThresholds, type ClassifierUsageLike, type ScreeningInput, type ScreeningResult } from "./engine.ts";
 import { buildScreeningEfficiency, type ScreeningEfficiencyMetrics } from "./metrics.ts";
 import type { ScreeningPreset, ScreeningStagePreset } from "./presets/types.ts";
 import type { ReviewWorkflowProgress, ReviewWorkflowStartResult } from "./review-workflow.ts";
@@ -56,7 +56,10 @@ export interface PrimaryOutcomeManifestResult {
   primaryRunId: string;
   preset?: string;
   scope?: string;
+  /** Legacy alias of keepThreshold. */
   threshold?: number;
+  keepThreshold?: number;
+  dropThreshold?: number;
   labels: PrimaryOutcomeLabel[];
   total: number;
   matched: number;
@@ -125,7 +128,10 @@ function primaryOutcomeItems(
   state: PrimaryRunState,
   labels: Set<PrimaryOutcomeLabel>,
 ): PrimaryOutcomeManifestItem[] {
-  const threshold = state.preset.primary.threshold ?? DEFAULT_THRESHOLD;
+  const { keepThreshold, dropThreshold } = resolveScreeningThresholds({
+    threshold: state.preset.primary.threshold ?? DEFAULT_THRESHOLD,
+    dropThreshold: state.preset.primary.dropThreshold,
+  });
   const byId = new Map(state.allItems.map((item) => [item.id, item]));
   const output: PrimaryOutcomeManifestItem[] = [];
   const append = (
@@ -152,15 +158,13 @@ function primaryOutcomeItems(
   const result = state.primaryResult;
   if (!result) return output;
   for (const item of result.kept) {
-    append(item.id, "KEEP", `keepProbability ${item.probability.toFixed(6)} >= keep threshold ${threshold.toFixed(6)}`, item.probability, item.probability);
+    append(item.id, "KEEP", `keepProbability ${item.probability.toFixed(6)} >= keep threshold ${keepThreshold.toFixed(6)}`, item.probability, item.probability);
   }
   for (const item of result.dropped) {
-    const dropThreshold = 1 - threshold;
     append(item.id, "DROP", `keepProbability ${item.probability.toFixed(6)} <= drop threshold ${dropThreshold.toFixed(6)}`, item.probability, 1 - item.probability);
   }
   for (const item of result.undecided) {
-    const dropThreshold = 1 - threshold;
-    append(item.id, "UNDECIDED", `keepProbability ${item.probability.toFixed(6)} is between drop threshold ${dropThreshold.toFixed(6)} and keep threshold ${threshold.toFixed(6)}`, item.probability);
+    append(item.id, "UNDECIDED", `keepProbability ${item.probability.toFixed(6)} is between drop threshold ${dropThreshold.toFixed(6)} and keep threshold ${keepThreshold.toFixed(6)}`, item.probability);
   }
   for (const item of result.withheld) append(item.id, "WITHHELD", item.reason);
   for (const item of result.errors) append(item.id, "ERROR", item.message ? `${item.reason}: ${item.message}` : item.reason);
@@ -182,6 +186,7 @@ function stageInput(
     question: stage.question,
     criteria: stage.criteria,
     threshold: stage.threshold,
+    ...(stage.dropThreshold === undefined ? {} : { dropThreshold: stage.dropThreshold }),
     confirm: request.confirm,
     ...(request.provider ? { provider: request.provider } : {}),
     ...(request.model ? { model: request.model } : {}),
@@ -480,6 +485,8 @@ export class PresetScreeningWorkflowManager {
       preset: state.preset.id,
       scope: state.scope,
       threshold: state.preset.primary.threshold ?? DEFAULT_THRESHOLD,
+      keepThreshold: state.preset.primary.threshold ?? DEFAULT_THRESHOLD,
+      dropThreshold: state.preset.primary.dropThreshold ?? (1 - (state.preset.primary.threshold ?? DEFAULT_THRESHOLD)),
       labels,
       total: state.allItems.length,
       matched: items.length,

@@ -751,6 +751,8 @@ const primaryManifestOutputSchema = Type.Object(
     preset: Type.Optional(Type.String()),
     scope: Type.Optional(Type.String()),
     threshold: Type.Optional(Type.Number({ minimum: 0.5, maximum: 1 })),
+    keepThreshold: Type.Optional(Type.Number({ minimum: 0.5, maximum: 1 })),
+    dropThreshold: Type.Optional(Type.Number({ minimum: 0, maximum: 0.499999999999 })),
     labels: Type.Array(primaryOutcomeLabelSchema),
     total: Type.Integer({ minimum: 0 }),
     matched: Type.Integer({ minimum: 0 }),
@@ -882,7 +884,13 @@ const parameters = Type.Object(
       ),
     ),
     threshold: Type.Optional(
-      Type.Number({ exclusiveMinimum: 0.5, maximum: 1, description: "Default 0.70" }),
+      Type.Number({ exclusiveMinimum: 0.5, maximum: 1, description: "Legacy symmetric keep threshold. Default 0.70; DROP uses 1-threshold unless dropThreshold is explicit." }),
+    ),
+    keepThreshold: Type.Optional(
+      Type.Number({ exclusiveMinimum: 0.5, maximum: 1, description: "Explicit keep threshold; must match threshold when both are supplied." }),
+    ),
+    dropThreshold: Type.Optional(
+      Type.Number({ minimum: 0, exclusiveMaximum: 0.5, description: "Explicit fail-closed DROP threshold." }),
     ),
     provider: Type.Optional(Type.String({ minLength: 1 })),
     model: Type.Optional(Type.String({ minLength: 1 })),
